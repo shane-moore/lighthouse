@@ -30,6 +30,7 @@ pub mod fetch_blobs;
 pub mod fork_choice_signal;
 pub mod fork_revert;
 pub mod fulu_readiness;
+pub mod gloas_readiness;
 pub mod graffiti_calculator;
 pub mod historical_blocks;
 pub mod kzg_utils;
