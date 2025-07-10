@@ -5,6 +5,7 @@ use beacon_chain::{
     deneb_readiness::DenebReadiness,
     electra_readiness::ElectraReadiness,
     fulu_readiness::FuluReadiness,
+    gloas_readiness::GloasReadiness,
     BeaconChain, BeaconChainTypes, ExecutionStatus,
 };
 use lighthouse_network::{types::SyncState, NetworkGlobals};
@@ -313,6 +314,7 @@ pub fn spawn_notifier<T: BeaconChainTypes>(
             deneb_readiness_logging(current_slot, &beacon_chain).await;
             electra_readiness_logging(current_slot, &beacon_chain).await;
             fulu_readiness_logging(current_slot, &beacon_chain).await;
+            gloas_readiness_logging(current_slot, &beacon_chain).await;
         }
     };
 
@@ -611,6 +613,57 @@ async fn fulu_readiness_logging<T: BeaconChainTypes>(
             hint = "try updating the execution endpoint",
             info = %readiness,
             "Not ready for Fulu"
+        ),
+    }
+}
+
+/// Provides some helpful logging to users to indicate if their node is ready for Gloas.
+async fn gloas_readiness_logging<T: BeaconChainTypes>(
+    current_slot: Slot,
+    beacon_chain: &BeaconChain<T>,
+) {
+    let gloas_completed = beacon_chain
+        .canonical_head
+        .cached_head()
+        .snapshot
+        .beacon_state
+        .fork_name_unchecked()
+        .gloas_enabled();
+
+    let has_execution_layer = beacon_chain.execution_layer.is_some();
+
+    if gloas_completed && has_execution_layer
+        || !beacon_chain.is_time_to_prepare_for_gloas(current_slot)
+    {
+        return;
+    }
+
+    if gloas_completed && !has_execution_layer {
+        error!(
+            info = "you need a Gloas enabled execution engine to validate blocks.",
+            "Execution endpoint required"
+        );
+        return;
+    }
+
+    match beacon_chain.check_gloas_readiness().await {
+        GloasReadiness::Ready => {
+            info!(
+                info = "ensure the execution endpoint is updated to the latest Gloas release",
+                "Ready for Gloas"
+            )
+        }
+        readiness @ GloasReadiness::ExchangeCapabilitiesFailed { error: _ } => {
+            error!(
+                hint = "the execution endpoint may be offline",
+                info = %readiness,
+                "Not ready for Gloas"
+            )
+        }
+        readiness => warn!(
+            hint = "try updating the execution endpoint",
+            info = %readiness,
+            "Not ready for Gloas"
         ),
     }
 }
