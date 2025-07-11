@@ -1,12 +1,17 @@
 use crate::metrics;
 use beacon_chain::{
     BeaconChain, BeaconChainTypes, ExecutionStatus,
-    bellatrix_readiness::{BellatrixReadiness, GenesisExecutionPayloadStatus, MergeConfig},
-    capella_readiness::CapellaReadiness,
-    deneb_readiness::DenebReadiness,
-    electra_readiness::ElectraReadiness,
-    fulu_readiness::FuluReadiness,
-    gloas_readiness::GloasReadiness,
+    bellatrix_readiness::{
+        BellatrixReadiness, GenesisExecutionPayloadStatus, MergeConfig, SECONDS_IN_A_WEEK,
+    },
+};
+use execution_layer::{
+    EngineCapabilities,
+    http::{
+        ENGINE_FORKCHOICE_UPDATED_V2, ENGINE_FORKCHOICE_UPDATED_V3, ENGINE_GET_PAYLOAD_V2,
+        ENGINE_GET_PAYLOAD_V3, ENGINE_GET_PAYLOAD_V4, ENGINE_NEW_PAYLOAD_V2, ENGINE_NEW_PAYLOAD_V3,
+        ENGINE_NEW_PAYLOAD_V4,
+    },
 };
 use lighthouse_network::{NetworkGlobals, types::SyncState};
 use logging::crit;
@@ -30,6 +35,9 @@ const SPEEDO_OBSERVATIONS: usize = 4;
 
 /// The number of slots between logs that give detail about backfill process.
 const BACKFILL_LOG_INTERVAL: u64 = 5;
+
+pub const FORK_READINESS_PREPARATION_SECONDS: u64 = SECONDS_IN_A_WEEK * 2;
+pub const ENGINE_CAPABILITIES_REFRESH_INTERVAL: u64 = 300;
 
 /// Spawns a notifier service which periodically logs information about the node.
 pub fn spawn_notifier<T: BeaconChainTypes>(
@@ -62,7 +70,7 @@ pub fn spawn_notifier<T: BeaconChainTypes>(
                         "Waiting for genesis"
                     );
                     bellatrix_readiness_logging(Slot::new(0), &beacon_chain).await;
-                    capella_readiness_logging(Slot::new(0), &beacon_chain).await;
+                    post_bellatrix_readiness_logging(Slot::new(0), &beacon_chain).await;
                     genesis_execution_payload_logging(&beacon_chain).await;
                     sleep(slot_duration).await;
                 }
@@ -310,11 +318,7 @@ pub fn spawn_notifier<T: BeaconChainTypes>(
             }
 
             bellatrix_readiness_logging(current_slot, &beacon_chain).await;
-            capella_readiness_logging(current_slot, &beacon_chain).await;
-            deneb_readiness_logging(current_slot, &beacon_chain).await;
-            electra_readiness_logging(current_slot, &beacon_chain).await;
-            fulu_readiness_logging(current_slot, &beacon_chain).await;
-            gloas_readiness_logging(current_slot, &beacon_chain).await;
+            post_bellatrix_readiness_logging(current_slot, &beacon_chain).await;
         }
     };
 
@@ -345,18 +349,6 @@ async fn bellatrix_readiness_logging<T: BeaconChainTypes>(
     if merge_completed && has_execution_layer
         || !beacon_chain.is_time_to_prepare_for_bellatrix(current_slot)
     {
-        return;
-    }
-
-    if merge_completed && !has_execution_layer {
-        // Logging of the EE being offline is handled in the other readiness logging functions.
-        if !beacon_chain.is_time_to_prepare_for_capella(current_slot) {
-            error!(
-                info = "you need an execution engine to validate blocks, see: \
-                https://lighthouse-book.sigmaprime.io/archived_merge_migration.html",
-                "Execution endpoint required"
-            );
-        }
         return;
     }
 
@@ -408,264 +400,146 @@ async fn bellatrix_readiness_logging<T: BeaconChainTypes>(
 }
 
 /// Provides some helpful logging to users to indicate if their node is ready for Capella
-async fn capella_readiness_logging<T: BeaconChainTypes>(
+async fn post_bellatrix_readiness_logging<T: BeaconChainTypes>(
     current_slot: Slot,
     beacon_chain: &BeaconChain<T>,
 ) {
-    let capella_completed = beacon_chain
-        .canonical_head
-        .cached_head()
-        .snapshot
-        .beacon_state
-        .fork_name_unchecked()
-        .capella_enabled();
+    if let Some(fork) = find_next_fork_to_prepare(current_slot, beacon_chain) {
+        let readiness = if let Some(el) = beacon_chain.execution_layer.as_ref() {
+            match el
+                .get_engine_capabilities(Some(Duration::from_secs(
+                    ENGINE_CAPABILITIES_REFRESH_INTERVAL,
+                )))
+                .await
+            {
+                Err(e) => Err(format!("Exchange capabilities failed: {e:?}")),
+                Ok(capabilities) => {
+                    let missing_methods = methods_required_for_fork(fork, capabilities);
+                    if missing_methods.is_empty() {
+                        Ok(())
+                    } else {
+                        Err(format!("Missing required methods: {missing_methods:?}"))
+                    }
+                }
+            }
+        } else {
+            Err("No execution endpoint".to_string())
+        };
 
-    let has_execution_layer = beacon_chain.execution_layer.is_some();
-
-    if capella_completed && has_execution_layer
-        || !beacon_chain.is_time_to_prepare_for_capella(current_slot)
-    {
-        return;
-    }
-
-    if capella_completed && !has_execution_layer {
-        // Logging of the EE being offline is handled in the other readiness logging functions.
-        if !beacon_chain.is_time_to_prepare_for_deneb(current_slot) {
-            error!(
-                info = "you need a Capella enabled execution engine to validate blocks, see: \
-                           https://lighthouse-book.sigmaprime.io/archived_merge_migration.html",
-                "Execution endpoint required"
+        if let Err(readiness) = readiness {
+            warn!(
+                info = %readiness,
+                "Not ready for {}", fork
             );
-        }
-        return;
-    }
-
-    match beacon_chain.check_capella_readiness().await {
-        CapellaReadiness::Ready => {
+        } else {
             info!(
-                info = "ensure the execution endpoint is updated to the latest Capella/Shanghai release",
-                "Ready for Capella"
+                info = "ensure the execution endpoint is updated to the latest release",
+                "Ready for {}", fork
             )
         }
-        readiness @ CapellaReadiness::ExchangeCapabilitiesFailed { error: _ } => {
-            error!(
-                hint = "the execution endpoint may be offline",
-                info = %readiness,
-                "Not ready for Capella"
-            )
-        }
-        readiness => warn!(
-            hint = "try updating the execution endpoint",
-            info = %readiness,
-            "Not ready for Capella"
-        ),
     }
 }
 
-/// Provides some helpful logging to users to indicate if their node is ready for Deneb
-async fn deneb_readiness_logging<T: BeaconChainTypes>(
+fn find_next_fork_to_prepare<T: BeaconChainTypes>(
     current_slot: Slot,
     beacon_chain: &BeaconChain<T>,
-) {
-    let deneb_completed = beacon_chain
+) -> Option<ForkName> {
+    let head_fork = beacon_chain
         .canonical_head
         .cached_head()
         .snapshot
         .beacon_state
-        .fork_name_unchecked()
-        .deneb_enabled();
+        .fork_name_unchecked();
 
-    let has_execution_layer = beacon_chain.execution_layer.is_some();
-
-    if deneb_completed && has_execution_layer
-        || !beacon_chain.is_time_to_prepare_for_deneb(current_slot)
+    // Iterate forks from latest to oldest
+    for (fork, fork_epoch) in ForkName::list_all_fork_epochs(&beacon_chain.spec)
+        .iter()
+        .rev()
     {
-        return;
-    }
-
-    if deneb_completed && !has_execution_layer {
-        error!(
-            info = "you need a Deneb enabled execution engine to validate blocks.",
-            "Execution endpoint required"
-        );
-        return;
-    }
-
-    match beacon_chain.check_deneb_readiness().await {
-        DenebReadiness::Ready => {
-            info!(
-                info =
-                    "ensure the execution endpoint is updated to the latest Deneb/Cancun release",
-                "Ready for Deneb"
-            )
+        // This readiness only handles capella and post fork
+        if *fork <= ForkName::Bellatrix {
+            break;
         }
-        readiness @ DenebReadiness::ExchangeCapabilitiesFailed { error: _ } => {
-            error!(
-                hint = "the execution endpoint may be offline",
-                info = %readiness,
-                "Not ready for Deneb"
-            )
+
+        // head state has already activated this fork
+        if head_fork >= *fork {
+            break;
         }
-        readiness => warn!(
-            hint = "try updating the execution endpoint",
-            info = %readiness,
-            "Not ready for Deneb"
-        ),
-    }
-}
-/// Provides some helpful logging to users to indicate if their node is ready for Electra.
-async fn electra_readiness_logging<T: BeaconChainTypes>(
-    current_slot: Slot,
-    beacon_chain: &BeaconChain<T>,
-) {
-    let electra_completed = beacon_chain
-        .canonical_head
-        .cached_head()
-        .snapshot
-        .beacon_state
-        .fork_name_unchecked()
-        .electra_enabled();
 
-    let has_execution_layer = beacon_chain.execution_layer.is_some();
-
-    if electra_completed && has_execution_layer
-        || !beacon_chain.is_time_to_prepare_for_electra(current_slot)
-    {
-        return;
-    }
-
-    if electra_completed && !has_execution_layer {
-        // When adding a new fork, add a check for the next fork readiness here.
-        error!(
-            info = "you need a Electra enabled execution engine to validate blocks.",
-            "Execution endpoint required"
-        );
-        return;
-    }
-
-    match beacon_chain.check_electra_readiness().await {
-        ElectraReadiness::Ready => {
-            info!(
-                info =
-                    "ensure the execution endpoint is updated to the latest Electra/Prague release",
-                "Ready for Electra"
-            )
+        // Find the first fork that is scheduled and close to happen
+        if let Some(fork_epoch) = fork_epoch {
+            let fork_slot = fork_epoch.start_slot(T::EthSpec::slots_per_epoch());
+            let preparation_slots =
+                FORK_READINESS_PREPARATION_SECONDS / beacon_chain.spec.seconds_per_slot;
+            let in_fork_preparation_period = current_slot + preparation_slots > fork_slot;
+            if in_fork_preparation_period {
+                return Some(*fork);
+            }
         }
-        readiness @ ElectraReadiness::ExchangeCapabilitiesFailed { error: _ } => {
-            error!(
-                hint = "the execution endpoint may be offline",
-                info = %readiness,
-                "Not ready for Electra"
-            )
-        }
-        readiness => warn!(
-            hint = "try updating the execution endpoint",
-            info = %readiness,
-            "Not ready for Electra"
-        ),
     }
+
+    None
 }
 
-/// Provides some helpful logging to users to indicate if their node is ready for Fulu.
-async fn fulu_readiness_logging<T: BeaconChainTypes>(
-    current_slot: Slot,
-    beacon_chain: &BeaconChain<T>,
-) {
-    let fulu_completed = beacon_chain
-        .canonical_head
-        .cached_head()
-        .snapshot
-        .beacon_state
-        .fork_name_unchecked()
-        .fulu_enabled();
-
-    let has_execution_layer = beacon_chain.execution_layer.is_some();
-
-    if fulu_completed && has_execution_layer
-        || !beacon_chain.is_time_to_prepare_for_fulu(current_slot)
-    {
-        return;
-    }
-
-    if fulu_completed && !has_execution_layer {
-        error!(
-            info = "you need a Fulu enabled execution engine to validate blocks.",
-            "Execution endpoint required"
-        );
-        return;
-    }
-
-    match beacon_chain.check_fulu_readiness().await {
-        FuluReadiness::Ready => {
-            info!(
-                info = "ensure the execution endpoint is updated to the latest Fulu release",
-                "Ready for Fulu"
-            )
+fn methods_required_for_fork(
+    fork: ForkName,
+    capabilities: EngineCapabilities,
+) -> Vec<&'static str> {
+    let mut missing_methods = vec![];
+    match fork {
+        ForkName::Base | ForkName::Altair | ForkName::Bellatrix => {
+            unreachable!()
         }
-        readiness @ FuluReadiness::ExchangeCapabilitiesFailed { error: _ } => {
-            error!(
-                hint = "the execution endpoint may be offline",
-                info = %readiness,
-                "Not ready for Fulu"
-            )
+        ForkName::Capella => {
+            if !capabilities.get_payload_v2 {
+                missing_methods.push(ENGINE_GET_PAYLOAD_V2);
+            }
+            if !capabilities.forkchoice_updated_v2 {
+                missing_methods.push(ENGINE_FORKCHOICE_UPDATED_V2);
+            }
+            if !capabilities.new_payload_v2 {
+                missing_methods.push(ENGINE_NEW_PAYLOAD_V2);
+            }
         }
-        readiness => warn!(
-            hint = "try updating the execution endpoint",
-            info = %readiness,
-            "Not ready for Fulu"
-        ),
-    }
-}
-
-/// Provides some helpful logging to users to indicate if their node is ready for Gloas.
-async fn gloas_readiness_logging<T: BeaconChainTypes>(
-    current_slot: Slot,
-    beacon_chain: &BeaconChain<T>,
-) {
-    let gloas_completed = beacon_chain
-        .canonical_head
-        .cached_head()
-        .snapshot
-        .beacon_state
-        .fork_name_unchecked()
-        .gloas_enabled();
-
-    let has_execution_layer = beacon_chain.execution_layer.is_some();
-
-    if gloas_completed && has_execution_layer
-        || !beacon_chain.is_time_to_prepare_for_gloas(current_slot)
-    {
-        return;
-    }
-
-    if gloas_completed && !has_execution_layer {
-        error!(
-            info = "you need a Gloas enabled execution engine to validate blocks.",
-            "Execution endpoint required"
-        );
-        return;
-    }
-
-    match beacon_chain.check_gloas_readiness().await {
-        GloasReadiness::Ready => {
-            info!(
-                info = "ensure the execution endpoint is updated to the latest Gloas release",
-                "Ready for Gloas"
-            )
+        ForkName::Deneb => {
+            if !capabilities.get_payload_v3 {
+                missing_methods.push(ENGINE_GET_PAYLOAD_V3);
+            }
+            if !capabilities.forkchoice_updated_v3 {
+                missing_methods.push(ENGINE_FORKCHOICE_UPDATED_V3);
+            }
+            if !capabilities.new_payload_v3 {
+                missing_methods.push(ENGINE_NEW_PAYLOAD_V3);
+            }
         }
-        readiness @ GloasReadiness::ExchangeCapabilitiesFailed { error: _ } => {
-            error!(
-                hint = "the execution endpoint may be offline",
-                info = %readiness,
-                "Not ready for Gloas"
-            )
+        ForkName::Electra => {
+            if !capabilities.get_payload_v4 {
+                missing_methods.push(ENGINE_GET_PAYLOAD_V4);
+            }
+            if !capabilities.new_payload_v4 {
+                missing_methods.push(ENGINE_NEW_PAYLOAD_V4);
+            }
         }
-        readiness => warn!(
-            hint = "try updating the execution endpoint",
-            info = %readiness,
-            "Not ready for Gloas"
-        ),
+        ForkName::Fulu => {
+            // TODO(fulu) switch to v5 when the EL is ready
+            if !capabilities.get_payload_v4 {
+                missing_methods.push(ENGINE_GET_PAYLOAD_V4);
+            }
+            if !capabilities.new_payload_v4 {
+                missing_methods.push(ENGINE_NEW_PAYLOAD_V4);
+            }
+        }
+        ForkName::Gloas => {
+            // TODO(gloas) switch to v5/v6 when the EL is ready
+            if !capabilities.get_payload_v4 {
+                missing_methods.push(ENGINE_GET_PAYLOAD_V4);
+            }
+            if !capabilities.new_payload_v4 {
+                missing_methods.push(ENGINE_NEW_PAYLOAD_V4);
+            }
+        }
     }
+    missing_methods
 }
 
 async fn genesis_execution_payload_logging<T: BeaconChainTypes>(beacon_chain: &BeaconChain<T>) {
