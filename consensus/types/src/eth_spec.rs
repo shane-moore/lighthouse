@@ -163,6 +163,12 @@ pub trait EthSpec: 'static + Default + Sync + Send + Clone + Debug + PartialEq +
     type MaxWithdrawalRequestsPerPayload: Unsigned + Clone + Sync + Send + Debug + PartialEq;
     type MaxPendingDepositsPerEpoch: Unsigned + Clone + Sync + Send + Debug + PartialEq;
 
+    /*
+     * New in Gloas
+     */
+    type PTCSize: Unsigned + Clone + Sync + Send + Debug + PartialEq;
+    type MaxPayloadAttestations: Unsigned + Clone + Sync + Send + Debug + PartialEq;
+
     fn default_spec() -> ChainSpec;
 
     fn spec_name() -> EthSpecId;
@@ -381,6 +387,14 @@ pub trait EthSpec: 'static + Default + Sync + Send + Clone + Debug + PartialEq +
     fn proposer_lookahead_slots() -> usize {
         Self::ProposerLookaheadSlots::to_usize()
     }
+
+    fn ptc_size() -> usize {
+        Self::PTCSize::to_usize()
+    }
+
+    fn max_payload_attestations() -> usize {
+        Self::MaxPayloadAttestations::to_usize()
+    }
 }
 
 /// Macro to inherit some type values from another EthSpec.
@@ -448,6 +462,8 @@ impl EthSpec for MainnetEthSpec {
     type MaxAttestationsElectra = U8;
     type MaxWithdrawalRequestsPerPayload = U16;
     type MaxPendingDepositsPerEpoch = U16;
+    type PTCSize = U64; // todo: verify if needs to be U512 for some reason like in Mark's OG implementation
+    type MaxPayloadAttestations = U4;
 
     fn default_spec() -> ChainSpec {
         ChainSpec::mainnet()
@@ -516,7 +532,9 @@ impl EthSpec for MinimalEthSpec {
         MaxAttesterSlashingsElectra,
         MaxAttestationsElectra,
         MaxDepositRequestsPerPayload,
-        MaxWithdrawalRequestsPerPayload
+        MaxWithdrawalRequestsPerPayload,
+        PTCSize,
+        MaxPayloadAttestations
     });
 
     fn default_spec() -> ChainSpec {
@@ -585,6 +603,8 @@ impl EthSpec for GnosisEthSpec {
     type BytesPerCell = U2048;
     type KzgCommitmentsInclusionProofDepth = U4;
     type ProposerLookaheadSlots = U32; // Derived from (MIN_SEED_LOOKAHEAD + 1) * SLOTS_PER_EPOCH
+    type PTCSize = U64; // todo: verify if needs to be U512 for some reason like in Mark's OG implementation
+    type MaxPayloadAttestations = U4;
 
     fn default_spec() -> ChainSpec {
         ChainSpec::gnosis()
