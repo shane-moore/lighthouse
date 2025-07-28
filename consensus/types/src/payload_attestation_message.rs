@@ -6,7 +6,6 @@ use test_random_derive::TestRandom;
 use tree_hash_derive::TreeHash;
 
 #[derive(
-    arbitrary::Arbitrary,
     TestRandom,
     TreeHash,
     Debug,
@@ -17,6 +16,7 @@ use tree_hash_derive::TreeHash;
     Serialize,
     Deserialize,
 )]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[context_deserialize(ForkName)]
 pub struct PayloadAttestationMessage {
     #[serde(with = "serde_utils::quoted_u64")]

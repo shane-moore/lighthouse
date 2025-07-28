@@ -6,7 +6,6 @@ use test_random_derive::TestRandom;
 use tree_hash_derive::TreeHash;
 
 #[derive(
-    arbitrary::Arbitrary,
     Debug,
     PartialEq,
     Eq,
@@ -19,6 +18,7 @@ use tree_hash_derive::TreeHash;
     TreeHash,
     TestRandom,
 )]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[context_deserialize(ForkName)]
 pub struct BuilderPendingWithdrawal {
     #[serde(with = "serde_utils::address_hex")]

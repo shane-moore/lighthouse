@@ -21,12 +21,12 @@ use tree_hash_derive::TreeHash;
             Decode,
             TreeHash,
             TestRandom,
-            Derivative,
-            arbitrary::Arbitrary
+            Derivative
         ),
+        cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary)),
         derivative(PartialEq, Hash(bound = "E: EthSpec")),
         serde(bound = "E: EthSpec", deny_unknown_fields),
-        arbitrary(bound = "E: EthSpec")
+        cfg_attr(feature = "arbitrary", arbitrary(bound = "E: EthSpec"))
     ),
     ref_attributes(
         derive(Debug, PartialEq, TreeHash),
@@ -35,12 +35,9 @@ use tree_hash_derive::TreeHash;
     cast_error(ty = "Error", expr = "BeaconStateError::IncorrectStateVariant"),
     partial_getter_error(ty = "Error", expr = "BeaconStateError::IncorrectStateVariant")
 )]
-#[derive(
-    Debug, Clone, Serialize, Encode, Deserialize, TreeHash, Derivative, arbitrary::Arbitrary,
-)]
+#[derive(Debug, Clone, Serialize, Encode, Deserialize, TreeHash, Derivative)]
 #[derivative(PartialEq, Hash(bound = "E: EthSpec"))]
 #[serde(bound = "E: EthSpec", untagged)]
-#[arbitrary(bound = "E: EthSpec")]
 #[ssz(enum_behaviour = "transparent")]
 #[tree_hash(enum_behaviour = "transparent")]
 #[context_deserialize(ForkName)]

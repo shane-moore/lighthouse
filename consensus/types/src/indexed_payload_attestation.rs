@@ -7,7 +7,6 @@ use test_random_derive::TestRandom;
 use tree_hash_derive::TreeHash;
 
 #[derive(
-    arbitrary::Arbitrary,
     TestRandom,
     TreeHash,
     Debug,
@@ -18,8 +17,9 @@ use tree_hash_derive::TreeHash;
     Serialize,
     Deserialize,
 )]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[serde(bound = "E: EthSpec", deny_unknown_fields)]
-#[arbitrary(bound = "E: EthSpec")]
+#[cfg_attr(feature = "arbitrary", arbitrary(bound = "E: EthSpec"))]
 #[context_deserialize(ForkName)]
 pub struct IndexedPayloadAttestation<E: EthSpec> {
     pub attesting_indices: VariableList<u64, E::PTCSize>,

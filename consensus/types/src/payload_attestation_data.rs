@@ -6,19 +6,9 @@ use test_random_derive::TestRandom;
 use tree_hash_derive::TreeHash;
 
 #[derive(
-    arbitrary::Arbitrary,
-    TestRandom,
-    TreeHash,
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-    Encode,
-    Decode,
-    Serialize,
-    Deserialize,
-    Hash,
+    TestRandom, TreeHash, Debug, Clone, PartialEq, Eq, Encode, Decode, Serialize, Deserialize, Hash,
 )]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[context_deserialize(ForkName)]
 pub struct PayloadAttestationData {
     pub beacon_block_root: Hash256,

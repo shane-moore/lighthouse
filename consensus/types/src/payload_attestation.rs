@@ -7,7 +7,6 @@ use test_random_derive::TestRandom;
 use tree_hash_derive::TreeHash;
 
 #[derive(
-    arbitrary::Arbitrary,
     TestRandom,
     TreeHash,
     Debug,
@@ -18,8 +17,9 @@ use tree_hash_derive::TreeHash;
     Deserialize,
     Derivative,
 )]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[serde(bound = "E: EthSpec", deny_unknown_fields)]
-#[arbitrary(bound = "E: EthSpec")]
+#[cfg_attr(feature = "arbitrary", arbitrary(bound = "E: EthSpec"))]
 #[derivative(PartialEq, Hash)]
 #[context_deserialize(ForkName)]
 pub struct PayloadAttestation<E: EthSpec> {

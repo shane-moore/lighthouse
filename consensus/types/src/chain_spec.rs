@@ -475,6 +475,12 @@ impl ChainSpec {
             .is_some_and(|fulu_fork_epoch| fulu_fork_epoch != self.far_future_epoch)
     }
 
+    /// Returns true if `GLOAS_FORK_EPOCH` is set and is not set to `FAR_FUTURE_EPOCH`.
+    pub fn is_gloas_scheduled(&self) -> bool {
+        self.gloas_fork_epoch
+            .is_some_and(|gloas_fork_epoch| gloas_fork_epoch != self.far_future_epoch)
+    }
+
     /// Returns a full `Fork` struct for a given epoch.
     pub fn fork_at_epoch(&self, epoch: Epoch) -> Fork {
         let current_fork_name = self.fork_name_at_epoch(epoch);

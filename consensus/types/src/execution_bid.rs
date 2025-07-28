@@ -6,7 +6,6 @@ use test_random_derive::TestRandom;
 use tree_hash_derive::TreeHash;
 
 #[derive(
-    arbitrary::Arbitrary,
     Default,
     Debug,
     Clone,
@@ -18,6 +17,7 @@ use tree_hash_derive::TreeHash;
     Derivative,
     TestRandom,
 )]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[derivative(PartialEq, Hash)]
 #[context_deserialize(ForkName)]
 // This is what Potuz' spec calls an `ExecutionPayload` even though it's clearly a bid.
