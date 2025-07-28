@@ -20,6 +20,7 @@ use tree_hash_derive::TreeHash;
 )]
 #[serde(bound = "E: EthSpec", deny_unknown_fields)]
 #[arbitrary(bound = "E: EthSpec")]
+#[context_deserialize(ForkName)]
 pub struct IndexedPayloadAttestation<E: EthSpec> {
     pub attesting_indices: VariableList<u64, E::PTCSize>,
     pub data: PayloadAttestationData,

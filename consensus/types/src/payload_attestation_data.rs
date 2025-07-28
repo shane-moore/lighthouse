@@ -19,10 +19,11 @@ use tree_hash_derive::TreeHash;
     Deserialize,
     Hash,
 )]
+#[context_deserialize(ForkName)]
 pub struct PayloadAttestationData {
     pub beacon_block_root: Hash256,
     pub slot: Slot,
-    pub payload_status: bool,
+    pub payload_present: bool,
 }
 // todo(eip-7732): Mark's implementation  has PayloadStatus as an enum, but spec calls for a bool. Need to clarify this.
 

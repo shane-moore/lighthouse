@@ -41,6 +41,7 @@ use tree_hash_derive::TreeHash;
 #[arbitrary(bound = "E: EthSpec")]
 #[ssz(enum_behaviour = "transparent")]
 #[tree_hash(enum_behaviour = "transparent")]
+#[context_deserialize(ForkName)]
 pub struct SignedExecutionPayloadEnvelope<E: EthSpec> {
     #[superstruct(only(Gloas), partial_getter(rename = "message_gloas"))]
     pub message: ExecutionPayloadEnvelopeGloas<E>,
@@ -58,4 +59,20 @@ impl<E: EthSpec> SignedExecutionPayloadEnvelope<E> {
     }
 
     // todo(eip-7732): implement verify_signature since spec calls for verify_execution_payload_envelope_signature
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::MainnetEthSpec;
+
+    mod gloas {
+        use super::*;
+        ssz_and_tree_hash_tests!(SignedExecutionPayloadEnvelopeGloas<MainnetEthSpec>);
+    }
+
+    mod next_fork {
+        use super::*;
+        ssz_and_tree_hash_tests!(SignedExecutionPayloadEnvelopeNextFork<MainnetEthSpec>);
+    }
 }

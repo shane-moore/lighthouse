@@ -18,19 +18,25 @@ use tree_hash_derive::TreeHash;
     Deserialize,
     Derivative,
 )]
-#[serde(bound = "E: EthSpec", deny_unknown_fields)]
-#[arbitrary(bound = "E: EthSpec")]
 #[derivative(PartialEq, Hash)]
 #[context_deserialize(ForkName)]
-pub struct PayloadAttestation<E: EthSpec> {
-    pub aggregation_bits: BitList<E::PTCSize>,
-    pub data: PayloadAttestationData,
-    pub signature: AggregateSignature,
+pub struct SignedExecutionBid {
+    pub message: ExecutionBid,
+    pub signature: Signature,
+}
+
+impl SignedExecutionBid {
+    pub fn empty() -> Self {
+        Self {
+            message: ExecutionBid::default(),
+            signature: Signature::empty(),
+        }
+    }
 }
 
 #[cfg(test)]
-mod payload_attestation_tests {
+mod tests {
     use super::*;
 
-    ssz_and_tree_hash_tests!(PayloadAttestation<MinimalEthSpec>);
+    ssz_and_tree_hash_tests!(SignedExecutionBid);
 }

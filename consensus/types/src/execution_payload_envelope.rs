@@ -43,6 +43,7 @@ use tree_hash_derive::TreeHash;
 #[arbitrary(bound = "E: EthSpec")]
 #[ssz(enum_behaviour = "transparent")]
 #[tree_hash(enum_behaviour = "transparent")]
+#[context_deserialize(ForkName)]
 pub struct ExecutionPayloadEnvelope<E: EthSpec> {
     #[superstruct(only(Gloas), partial_getter(rename = "payload_gloas"))]
     pub payload: ExecutionPayloadGloas<E>,
@@ -54,9 +55,9 @@ pub struct ExecutionPayloadEnvelope<E: EthSpec> {
     pub builder_index: u64,
     #[superstruct(getter(copy))]
     pub beacon_block_root: Hash256,
-    pub blob_kzg_commitments: KzgCommitments<E>,
     #[superstruct(getter(copy))]
-    pub payload_withheld: bool,
+    pub slot: Slot,
+    pub blob_kzg_commitments: KzgCommitments<E>,
     #[superstruct(getter(copy))]
     pub state_root: Hash256,
 }
@@ -69,5 +70,21 @@ impl<'a, E: EthSpec> ExecutionPayloadEnvelopeRef<'a, E> {
             Self::Gloas(envelope) => ExecutionPayloadRef::Gloas(&envelope.payload),
             Self::NextFork(envelope) => ExecutionPayloadRef::Gloas(&envelope.payload),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::MainnetEthSpec;
+
+    mod gloas {
+        use super::*;
+        ssz_and_tree_hash_tests!(ExecutionPayloadEnvelopeGloas<MainnetEthSpec>);
+    }
+
+    mod next_fork {
+        use super::*;
+        ssz_and_tree_hash_tests!(ExecutionPayloadEnvelopeNextFork<MainnetEthSpec>);
     }
 }

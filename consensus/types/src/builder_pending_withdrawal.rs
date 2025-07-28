@@ -7,27 +7,32 @@ use tree_hash_derive::TreeHash;
 
 #[derive(
     arbitrary::Arbitrary,
-    TestRandom,
-    TreeHash,
     Debug,
-    Clone,
     PartialEq,
-    Encode,
-    Decode,
+    Eq,
+    Hash,
+    Clone,
     Serialize,
     Deserialize,
+    Encode,
+    Decode,
+    TreeHash,
+    TestRandom,
 )]
 #[context_deserialize(ForkName)]
-pub struct PayloadAttestationMessage {
+pub struct BuilderPendingWithdrawal {
+    #[serde(with = "serde_utils::address_hex")]
+    pub fee_recipient: Address,
     #[serde(with = "serde_utils::quoted_u64")]
-    pub validator_index: u64,
-    pub data: PayloadAttestationData,
-    pub signature: AggregateSignature,
+    pub amount: u64,
+    #[serde(with = "serde_utils::quoted_u64")]
+    pub builder_index: u64,
+    pub withdrawable_epoch: Epoch,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    ssz_and_tree_hash_tests!(PayloadAttestationMessage);
+    ssz_and_tree_hash_tests!(BuilderPendingWithdrawal);
 }
