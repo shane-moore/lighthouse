@@ -2,6 +2,7 @@ use crate::test_utils::TestRandom;
 use crate::*;
 use beacon_block_body::KzgCommitments;
 use derivative::Derivative;
+use serde::de::{Deserializer, Error as _};
 use serde::{Deserialize, Serialize};
 use ssz_derive::{Decode, Encode};
 use superstruct::superstruct;
@@ -40,7 +41,6 @@ use tree_hash_derive::TreeHash;
 #[serde(bound = "E: EthSpec", untagged)]
 #[ssz(enum_behaviour = "transparent")]
 #[tree_hash(enum_behaviour = "transparent")]
-#[context_deserialize(ForkName)]
 pub struct ExecutionPayloadEnvelope<E: EthSpec> {
     #[superstruct(only(Gloas), partial_getter(rename = "payload_gloas"))]
     pub payload: ExecutionPayloadGloas<E>,
@@ -66,6 +66,22 @@ impl<'a, E: EthSpec> ExecutionPayloadEnvelopeRef<'a, E> {
         match self {
             Self::Gloas(envelope) => ExecutionPayloadRef::Gloas(&envelope.payload),
             Self::NextFork(envelope) => ExecutionPayloadRef::Gloas(&envelope.payload),
+        }
+    }
+}
+
+impl<'de, E: EthSpec> ContextDeserialize<'de, ForkName> for ExecutionPayloadEnvelope<E> {
+    fn context_deserialize<D>(deserializer: D, context: ForkName) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value: Self = serde::Deserialize::deserialize(deserializer)?;
+
+        match (context, &value) {
+            (ForkName::Gloas, Self::Gloas { .. }) => Ok(value),
+            _ => Err(D::Error::custom(format!(
+                "ExecutionPayloadEnvelope does not support fork {context:?}"
+            ))),
         }
     }
 }

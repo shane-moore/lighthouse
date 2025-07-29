@@ -1,6 +1,7 @@
 use crate::test_utils::TestRandom;
 use crate::*;
 use derivative::Derivative;
+use serde::de::{Deserializer, Error as _};
 use serde::{Deserialize, Serialize};
 use ssz_derive::{Decode, Encode};
 use superstruct::superstruct;
@@ -33,14 +34,11 @@ use tree_hash_derive::TreeHash;
     cast_error(ty = "Error", expr = "BeaconStateError::IncorrectStateVariant"),
     partial_getter_error(ty = "Error", expr = "BeaconStateError::IncorrectStateVariant")
 )]
-#[derive(
-    Debug, Clone, Serialize, Encode, Deserialize, TreeHash, Derivative,
-)]
+#[derive(Debug, Clone, Serialize, Encode, Deserialize, TreeHash, Derivative)]
 #[derivative(PartialEq, Hash(bound = "E: EthSpec"))]
 #[serde(bound = "E: EthSpec", untagged)]
 #[ssz(enum_behaviour = "transparent")]
 #[tree_hash(enum_behaviour = "transparent")]
-#[context_deserialize(ForkName)]
 pub struct SignedExecutionPayloadEnvelope<E: EthSpec> {
     #[superstruct(only(Gloas), partial_getter(rename = "message_gloas"))]
     pub message: ExecutionPayloadEnvelopeGloas<E>,
@@ -58,6 +56,22 @@ impl<E: EthSpec> SignedExecutionPayloadEnvelope<E> {
     }
 
     // todo(eip-7732): implement verify_signature since spec calls for verify_execution_payload_envelope_signature
+}
+
+impl<'de, E: EthSpec> ContextDeserialize<'de, ForkName> for SignedExecutionPayloadEnvelope<E> {
+    fn context_deserialize<D>(deserializer: D, context: ForkName) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value: Self = Deserialize::deserialize(deserializer)?;
+
+        match (context, &value) {
+            (ForkName::Gloas, Self::Gloas { .. }) => Ok(value),
+            _ => Err(D::Error::custom(format!(
+                "SignedExecutionPayloadEnvelope does not support fork {context:?}"
+            ))),
+        }
+    }
 }
 
 #[cfg(test)]
