@@ -61,7 +61,10 @@ pub const BLOB_KZG_COMMITMENTS_INDEX: usize = 11;
         Deneb(metastruct(mappings(beacon_block_body_deneb_fields(groups(fields))))),
         Electra(metastruct(mappings(beacon_block_body_electra_fields(groups(fields))))),
         Fulu(metastruct(mappings(beacon_block_body_fulu_fields(groups(fields))))),
-        Gloas(metastruct(mappings(beacon_block_body_gloas_fields(groups(fields))))),
+        Gloas(
+            derivative(PartialEq, Hash(bound = "E: EthSpec")),
+            metastruct(mappings(beacon_block_body_gloas_fields(groups(fields))))
+        ),
     ),
     cast_error(ty = "Error", expr = "Error::IncorrectStateVariant"),
     partial_getter_error(ty = "Error", expr = "Error::IncorrectStateVariant")
@@ -127,17 +130,22 @@ pub struct BeaconBlockBody<E: EthSpec, Payload: AbstractExecPayload<E> = FullPay
     #[superstruct(only(Fulu), partial_getter(rename = "execution_payload_fulu"))]
     #[serde(flatten)]
     pub execution_payload: Payload::Fulu,
-    #[superstruct(only(Gloas), partial_getter(rename = "execution_payload_gloas"))]
-    #[serde(flatten)]
-    pub execution_payload: Payload::Gloas,
+    // EIP-7732: execution_payload removed from Gloas, replaced with signed_execution_payload_header
     #[superstruct(only(Capella, Deneb, Electra, Fulu, Gloas))]
     pub bls_to_execution_changes:
         VariableList<SignedBlsToExecutionChange, E::MaxBlsToExecutionChanges>,
-    #[superstruct(only(Deneb, Electra, Fulu, Gloas))]
+    // EIP-7732: blob_kzg_commitments removed from Gloas, moved to execution payload envelope
+    #[superstruct(only(Deneb, Electra, Fulu))]
     pub blob_kzg_commitments: KzgCommitments<E>,
-    #[superstruct(only(Electra, Fulu, Gloas))]
+    // EIP-7732: execution_requests removed from Gloas, moved to execution payload envelope
+    #[superstruct(only(Electra, Fulu))]
     pub execution_requests: ExecutionRequests<E>,
-    #[superstruct(only(Base, Altair))]
+    // EIP-7732: New fields for Gloas
+    #[superstruct(only(Gloas))]
+    pub signed_execution_payload_header: SignedExecutionBid,
+    #[superstruct(only(Gloas))]
+    pub payload_attestations: VariableList<PayloadAttestation<E>, E::MaxPayloadAttestations>,
+    #[superstruct(only(Base, Altair, Gloas))]
     #[metastruct(exclude_from(fields))]
     #[ssz(skip_serializing, skip_deserializing)]
     #[tree_hash(skip_hashing)]
@@ -166,7 +174,8 @@ impl<'a, E: EthSpec, Payload: AbstractExecPayload<E>> BeaconBlockBodyRef<'a, E, 
             Self::Deneb(body) => Ok(Payload::Ref::from(&body.execution_payload)),
             Self::Electra(body) => Ok(Payload::Ref::from(&body.execution_payload)),
             Self::Fulu(body) => Ok(Payload::Ref::from(&body.execution_payload)),
-            Self::Gloas(body) => Ok(Payload::Ref::from(&body.execution_payload)),
+            // EIP-7732: Gloas uses signed_execution_payload_header instead of execution_payload
+            Self::Gloas(_) => Err(Error::IncorrectStateVariant),
         }
     }
 
@@ -233,7 +242,11 @@ impl<'a, E: EthSpec, Payload: AbstractExecPayload<E>> BeaconBlockBodyRef<'a, E, 
             Self::Base(_) | Self::Altair(_) | Self::Bellatrix(_) | Self::Capella(_) => {
                 Err(Error::IncorrectStateVariant)
             }
-            Self::Deneb(_) | Self::Electra(_) | Self::Fulu(_) | Self::Gloas(_) => {
+            // EIP-7732: Gloas removed since it doesn't have blob_kzg_commitments
+            Self::Gloas(_) => {
+                Err(Error::IncorrectStateVariant)
+            }
+            Self::Deneb(_) | Self::Electra(_) | Self::Fulu(_) => {
                 // We compute the branches by generating 2 merkle trees:
                 // 1. Merkle tree for the `blob_kzg_commitments` List object
                 // 2. Merkle tree for the `BeaconBlockBody` container
@@ -313,8 +326,13 @@ impl<'a, E: EthSpec, Payload: AbstractExecPayload<E>> BeaconBlockBodyRef<'a, E, 
 
     /// Return `true` if this block body has a non-zero number of blobs.
     pub fn has_blobs(self) -> bool {
-        self.blob_kzg_commitments()
-            .is_ok_and(|blobs| !blobs.is_empty())
+        // EIP-7732: Gloas doesn't have blob_kzg_commitments in beacon block body
+        // (they're moved to the execution payload envelope)
+        match self {
+            Self::Gloas(_) => false,
+            _ => self.blob_kzg_commitments()
+                .is_ok_and(|blobs| !blobs.is_empty())
+        }
     }
 
     pub fn attestations_len(&self) -> usize {
@@ -812,6 +830,7 @@ impl<E: EthSpec> From<BeaconBlockBodyGloas<E, FullPayload<E>>>
     )
 {
     fn from(body: BeaconBlockBodyGloas<E, FullPayload<E>>) -> Self {
+        // EIP-7732: Gloas structure is different - no execution_payload, blob_kzg_commitments, execution_requests
         let BeaconBlockBodyGloas {
             randao_reveal,
             eth1_data,
@@ -822,10 +841,10 @@ impl<E: EthSpec> From<BeaconBlockBodyGloas<E, FullPayload<E>>>
             deposits,
             voluntary_exits,
             sync_aggregate,
-            execution_payload: FullPayloadGloas { execution_payload },
             bls_to_execution_changes,
-            blob_kzg_commitments,
-            execution_requests,
+            signed_execution_payload_header,
+            payload_attestations,
+            _phantom,
         } = body;
 
         (
@@ -839,14 +858,12 @@ impl<E: EthSpec> From<BeaconBlockBodyGloas<E, FullPayload<E>>>
                 deposits,
                 voluntary_exits,
                 sync_aggregate,
-                execution_payload: BlindedPayloadGloas {
-                    execution_payload_header: From::from(&execution_payload),
-                },
                 bls_to_execution_changes,
-                blob_kzg_commitments: blob_kzg_commitments.clone(),
-                execution_requests,
+                signed_execution_payload_header,
+                payload_attestations,
+                _phantom: PhantomData,
             },
-            Some(execution_payload),
+            None, // EIP-7732: No execution payload to extract
         )
     }
 }
@@ -1046,6 +1063,7 @@ impl<E: EthSpec> BeaconBlockBodyFulu<E, FullPayload<E>> {
 
 impl<E: EthSpec> BeaconBlockBodyGloas<E, FullPayload<E>> {
     pub fn clone_as_blinded(&self) -> BeaconBlockBodyGloas<E, BlindedPayload<E>> {
+        // EIP-7732: Gloas structure is different - no execution_payload, blob_kzg_commitments, execution_requests
         let BeaconBlockBodyGloas {
             randao_reveal,
             eth1_data,
@@ -1056,10 +1074,10 @@ impl<E: EthSpec> BeaconBlockBodyGloas<E, FullPayload<E>> {
             deposits,
             voluntary_exits,
             sync_aggregate,
-            execution_payload: FullPayloadGloas { execution_payload },
             bls_to_execution_changes,
-            blob_kzg_commitments,
-            execution_requests,
+            signed_execution_payload_header,
+            payload_attestations,
+            _phantom,
         } = self;
 
         BeaconBlockBodyGloas {
@@ -1072,12 +1090,10 @@ impl<E: EthSpec> BeaconBlockBodyGloas<E, FullPayload<E>> {
             deposits: deposits.clone(),
             voluntary_exits: voluntary_exits.clone(),
             sync_aggregate: sync_aggregate.clone(),
-            execution_payload: BlindedPayloadGloas {
-                execution_payload_header: execution_payload.into(),
-            },
             bls_to_execution_changes: bls_to_execution_changes.clone(),
-            blob_kzg_commitments: blob_kzg_commitments.clone(),
-            execution_requests: execution_requests.clone(),
+            signed_execution_payload_header: signed_execution_payload_header.clone(),
+            payload_attestations: payload_attestations.clone(),
+            _phantom: PhantomData,
         }
     }
 }
