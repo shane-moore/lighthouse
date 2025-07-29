@@ -160,7 +160,7 @@ mod test {
             .expect("error opening file");
         let mut mainnet_spec = ChainSpec::mainnet();
         // setting fulu_fork_epoch because we are roundtripping a fulu config
-        mainnet_spec.gloas_fork_epoch = Some(Epoch::new(42));
+        mainnet_spec.fulu_fork_epoch = Some(Epoch::new(42));
         let mut yamlconfig = ConfigAndPreset::from_chain_spec::<MainnetEthSpec>(&mainnet_spec);
         let (k1, v1) = ("SAMPLE_HARDFORK_KEY1", "123456789");
         let (k2, v2) = ("SAMPLE_HARDFORK_KEY2", "987654321");
