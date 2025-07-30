@@ -672,10 +672,10 @@ impl<E: EthSpec, Payload: AbstractExecPayload<E>> EmptyBlock for BeaconBlockGloa
                 deposits: VariableList::empty(),
                 voluntary_exits: VariableList::empty(),
                 sync_aggregate: SyncAggregate::empty(),
-                execution_payload: Payload::Gloas::default(),
                 bls_to_execution_changes: VariableList::empty(),
-                blob_kzg_commitments: VariableList::empty(),
-                execution_requests: ExecutionRequests::default(),
+                signed_execution_payload_header: SignedExecutionBid::empty(),
+                payload_attestations: VariableList::empty(),
+                _phantom: PhantomData,
             },
         }
     }

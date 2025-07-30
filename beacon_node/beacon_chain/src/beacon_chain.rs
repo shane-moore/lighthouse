@@ -5727,15 +5727,12 @@ impl<T: BeaconChainTypes> BeaconChain<T> {
                 )
             }
             BeaconState::Gloas(_) => {
-                let (
-                    payload,
-                    kzg_commitments,
-                    maybe_blobs_and_proofs,
-                    maybe_requests,
-                    execution_payload_value,
-                ) = block_contents
-                    .ok_or(BlockProductionError::MissingExecutionPayload)?
-                    .deconstruct();
+                // Gloas blocks contain execution bids, not execution payloads
+                let block_proposal_contents =
+                    block_contents.ok_or(BlockProductionError::MissingExecutionBid)?;
+                let (signed_execution_bid, payload_attestations) = block_proposal_contents
+                    .into_execution_bid()
+                    .map_err(|_| BlockProductionError::InvalidPayloadFork)?;
 
                 (
                     BeaconBlock::Gloas(BeaconBlockGloas {
@@ -5754,18 +5751,15 @@ impl<T: BeaconChainTypes> BeaconChain<T> {
                             voluntary_exits: voluntary_exits.into(),
                             sync_aggregate: sync_aggregate
                                 .ok_or(BlockProductionError::MissingSyncAggregate)?,
-                            execution_payload: payload
-                                .try_into()
-                                .map_err(|_| BlockProductionError::InvalidPayloadFork)?,
                             bls_to_execution_changes: bls_to_execution_changes.into(),
-                            blob_kzg_commitments: kzg_commitments
-                                .ok_or(BlockProductionError::InvalidPayloadFork)?,
-                            execution_requests: maybe_requests
-                                .ok_or(BlockProductionError::MissingExecutionRequests)?,
+                            // EIP-7732: Use actual execution bid data
+                            signed_execution_payload_header: signed_execution_bid.clone(),
+                            payload_attestations,
+                            _phantom: PhantomData,
                         },
                     }),
-                    maybe_blobs_and_proofs,
-                    execution_payload_value,
+                    None,          // blob commitments moved to `ExecutionPayloadEnvelope`
+                    Uint256::ZERO, // No execution payload value for Gloas blocks, just bids value
                 )
             }
         };
