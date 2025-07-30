@@ -177,7 +177,7 @@ impl<'a, E: EthSpec> TryFrom<BeaconBlockRef<'a, E>> for NewPayloadRequest<'a, E>
 
     fn try_from(block: BeaconBlockRef<'a, E>) -> Result<Self, Self::Error> {
         match block {
-            BeaconBlockRef::Base(_) | BeaconBlockRef::Altair(_) => {
+            BeaconBlockRef::Base(_) | BeaconBlockRef::Altair(_) | BeaconBlockRef::Gloas(_) => {
                 Err(Self::Error::IncorrectStateVariant)
             }
             BeaconBlockRef::Bellatrix(block_ref) => {
@@ -210,17 +210,6 @@ impl<'a, E: EthSpec> TryFrom<BeaconBlockRef<'a, E>> for NewPayloadRequest<'a, E>
                 execution_requests: &block_ref.body.execution_requests,
             })),
             BeaconBlockRef::Fulu(block_ref) => Ok(Self::Fulu(NewPayloadRequestFulu {
-                execution_payload: &block_ref.body.execution_payload.execution_payload,
-                versioned_hashes: block_ref
-                    .body
-                    .blob_kzg_commitments
-                    .iter()
-                    .map(kzg_commitment_to_versioned_hash)
-                    .collect(),
-                parent_beacon_block_root: block_ref.parent_root,
-                execution_requests: &block_ref.body.execution_requests,
-            })),
-            BeaconBlockRef::Gloas(block_ref) => Ok(Self::Gloas(NewPayloadRequestGloas {
                 execution_payload: &block_ref.body.execution_payload.execution_payload,
                 versioned_hashes: block_ref
                     .body

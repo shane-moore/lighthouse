@@ -6,6 +6,7 @@ use merkle_proof::MerkleTree;
 use serde::{Deserialize, Deserializer, Serialize};
 use ssz_derive::{Decode, Encode};
 use std::fmt;
+use std::marker::PhantomData;
 use superstruct::superstruct;
 use test_random_derive::TestRandom;
 use tree_hash::TreeHash;
@@ -648,10 +649,11 @@ impl<E: EthSpec> SignedBeaconBlockFulu<E, BlindedPayload<E>> {
     }
 }
 
+/// Gloas doesn't support BlindedPayload, but we keep this impl for compatibility purposes of the SignedBeaconBlock type
 impl<E: EthSpec> SignedBeaconBlockGloas<E, BlindedPayload<E>> {
     pub fn into_full_block(
         self,
-        execution_payload: ExecutionPayloadGloas<E>,
+        _execution_payload: ExecutionPayloadGloas<E>,
     ) -> SignedBeaconBlockGloas<E, FullPayload<E>> {
         let SignedBeaconBlockGloas {
             message:
@@ -671,10 +673,10 @@ impl<E: EthSpec> SignedBeaconBlockGloas<E, BlindedPayload<E>> {
                             deposits,
                             voluntary_exits,
                             sync_aggregate,
-                            execution_payload: BlindedPayloadGloas { .. },
                             bls_to_execution_changes,
-                            blob_kzg_commitments,
-                            execution_requests,
+                            signed_execution_payload_header,
+                            payload_attestations,
+                            ..
                         },
                 },
             signature,
@@ -695,10 +697,10 @@ impl<E: EthSpec> SignedBeaconBlockGloas<E, BlindedPayload<E>> {
                     deposits,
                     voluntary_exits,
                     sync_aggregate,
-                    execution_payload: FullPayloadGloas { execution_payload },
                     bls_to_execution_changes,
-                    blob_kzg_commitments,
-                    execution_requests,
+                    signed_execution_payload_header,
+                    payload_attestations,
+                    _phantom: PhantomData,
                 },
             },
             signature,
