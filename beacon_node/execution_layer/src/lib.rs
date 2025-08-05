@@ -55,8 +55,8 @@ use types::{
 };
 use types::{
     BeaconStateError, BlindedPayload, ChainSpec, Epoch, ExecPayload, ExecutionPayloadBellatrix,
-    ExecutionPayloadCapella, ExecutionPayloadElectra, ExecutionPayloadFulu, ExecutionPayloadGloas,
-    FullPayload, ProposerPreparationData, PublicKeyBytes, Signature, Slot,
+    ExecutionPayloadCapella, ExecutionPayloadElectra, ExecutionPayloadFulu, FullPayload,
+    ProposerPreparationData, PublicKeyBytes, Signature, Slot,
 };
 
 mod block_hash;
@@ -126,13 +126,6 @@ impl<E: EthSpec> TryFrom<BuilderBid<E>> for ProvenancedPayload<BlockProposalCont
             },
             BuilderBid::Fulu(builder_bid) => BlockProposalContents::PayloadAndBlobs {
                 payload: ExecutionPayloadHeader::Fulu(builder_bid.header).into(),
-                block_value: builder_bid.value,
-                kzg_commitments: builder_bid.blob_kzg_commitments,
-                blobs_and_proofs: None,
-                requests: Some(builder_bid.execution_requests),
-            },
-            BuilderBid::Gloas(builder_bid) => BlockProposalContents::PayloadAndBlobs {
-                payload: ExecutionPayloadHeader::Gloas(builder_bid.header).into(),
                 block_value: builder_bid.value,
                 kzg_commitments: builder_bid.blob_kzg_commitments,
                 blobs_and_proofs: None,
@@ -219,7 +212,7 @@ pub enum BlockProposalContents<E: EthSpec, Payload: AbstractExecPayload<E>> {
         // See: https://github.com/sigp/lighthouse/issues/6981
         requests: Option<ExecutionRequests<E>>,
     },
-    /// EIP-7732: Execution bid and payload attestations for Gloas fork
+    /// Gloas: Execution bid and payload attestations
     BidAndPayloadAttestations {
         signed_execution_bid: SignedExecutionBid,
         payload_attestations: VariableList<PayloadAttestation<E>, E::MaxPayloadAttestations>,
@@ -1399,6 +1392,7 @@ impl<E: EthSpec> ExecutionLayer<E> {
     }
 
     /// Maps to the `engine_newPayload` JSON-RPC call.
+    /// TODO(EIP-7732) figure out how and why Mark relaxed new_payload_request param's typ to NewPayloadRequest<E>
     pub async fn notify_new_payload(
         &self,
         new_payload_request: NewPayloadRequest<'_, E>,
@@ -1870,8 +1864,10 @@ impl<E: EthSpec> ExecutionLayer<E> {
                 ForkName::Deneb => ExecutionPayloadDeneb::default().into(),
                 ForkName::Electra => ExecutionPayloadElectra::default().into(),
                 ForkName::Fulu => ExecutionPayloadFulu::default().into(),
-                ForkName::Gloas => ExecutionPayloadGloas::default().into(),
                 ForkName::Base | ForkName::Altair => {
+                    return Err(Error::InvalidForkForPayload);
+                }
+                ForkName::Gloas => {
                     return Err(Error::InvalidForkForPayload);
                 }
             };

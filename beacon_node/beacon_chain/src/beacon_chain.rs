@@ -5726,6 +5726,9 @@ impl<T: BeaconChainTypes> BeaconChain<T> {
                     execution_payload_value,
                 )
             }
+            // Below is my attempt at handling the Gloas variant
+            // Note that Mark's implementation had this as:
+            //  BeaconState::EIP7732(_) => todo!("EIP-7732 block production"),
             BeaconState::Gloas(_) => {
                 // Gloas blocks contain execution bids, not execution payloads
                 let block_proposal_contents =
@@ -5752,8 +5755,8 @@ impl<T: BeaconChainTypes> BeaconChain<T> {
                             sync_aggregate: sync_aggregate
                                 .ok_or(BlockProductionError::MissingSyncAggregate)?,
                             bls_to_execution_changes: bls_to_execution_changes.into(),
-                            // EIP-7732: Use actual execution bid data
-                            signed_execution_payload_header: signed_execution_bid.clone(),
+                            // Gloas: Use actual execution bid data
+                            signed_execution_bid: signed_execution_bid.clone(),
                             payload_attestations,
                             _phantom: PhantomData,
                         },

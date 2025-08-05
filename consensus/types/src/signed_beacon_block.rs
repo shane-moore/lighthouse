@@ -6,7 +6,6 @@ use merkle_proof::MerkleTree;
 use serde::{Deserialize, Deserializer, Serialize};
 use ssz_derive::{Decode, Encode};
 use std::fmt;
-use std::marker::PhantomData;
 use superstruct::superstruct;
 use test_random_derive::TestRandom;
 use tree_hash::TreeHash;
@@ -649,60 +648,14 @@ impl<E: EthSpec> SignedBeaconBlockFulu<E, BlindedPayload<E>> {
     }
 }
 
-/// Gloas doesn't support BlindedPayload, but we keep this impl for compatibility purposes of the SignedBeaconBlock type
-impl<E: EthSpec> SignedBeaconBlockGloas<E, BlindedPayload<E>> {
-    pub fn into_full_block(
-        self,
-        _execution_payload: ExecutionPayloadGloas<E>,
-    ) -> SignedBeaconBlockGloas<E, FullPayload<E>> {
-        let SignedBeaconBlockGloas {
-            message:
-                BeaconBlockGloas {
-                    slot,
-                    proposer_index,
-                    parent_root,
-                    state_root,
-                    body:
-                        BeaconBlockBodyGloas {
-                            randao_reveal,
-                            eth1_data,
-                            graffiti,
-                            proposer_slashings,
-                            attester_slashings,
-                            attestations,
-                            deposits,
-                            voluntary_exits,
-                            sync_aggregate,
-                            bls_to_execution_changes,
-                            signed_execution_payload_header,
-                            payload_attestations,
-                            ..
-                        },
-                },
-            signature,
-        } = self;
+// We can convert gloas blocks without payloads into blocks "with" payloads.
+impl<E: EthSpec> From<SignedBeaconBlockGloas<E, BlindedPayload<E>>>
+    for SignedBeaconBlockGloas<E, FullPayload<E>>
+{
+    fn from(signed_block: SignedBeaconBlockGloas<E, BlindedPayload<E>>) -> Self {
+        let SignedBeaconBlockGloas { message, signature } = signed_block;
         SignedBeaconBlockGloas {
-            message: BeaconBlockGloas {
-                slot,
-                proposer_index,
-                parent_root,
-                state_root,
-                body: BeaconBlockBodyGloas {
-                    randao_reveal,
-                    eth1_data,
-                    graffiti,
-                    proposer_slashings,
-                    attester_slashings,
-                    attestations,
-                    deposits,
-                    voluntary_exits,
-                    sync_aggregate,
-                    bls_to_execution_changes,
-                    signed_execution_payload_header,
-                    payload_attestations,
-                    _phantom: PhantomData,
-                },
-            },
+            message: message.into(),
             signature,
         }
     }
@@ -731,9 +684,7 @@ impl<E: EthSpec> SignedBeaconBlock<E, BlindedPayload<E>> {
             (SignedBeaconBlock::Fulu(block), Some(ExecutionPayload::Fulu(payload))) => {
                 SignedBeaconBlock::Fulu(block.into_full_block(payload))
             }
-            (SignedBeaconBlock::Gloas(block), Some(ExecutionPayload::Gloas(payload))) => {
-                SignedBeaconBlock::Gloas(block.into_full_block(payload))
-            }
+            (SignedBeaconBlock::Gloas(block), _) => SignedBeaconBlock::Gloas(block.into()),
             // avoid wildcard matching forks so that compiler will
             // direct us here when a new fork has been added
             (SignedBeaconBlock::Bellatrix(_), _) => return None,
@@ -741,7 +692,7 @@ impl<E: EthSpec> SignedBeaconBlock<E, BlindedPayload<E>> {
             (SignedBeaconBlock::Deneb(_), _) => return None,
             (SignedBeaconBlock::Electra(_), _) => return None,
             (SignedBeaconBlock::Fulu(_), _) => return None,
-            (SignedBeaconBlock::Gloas(_), _) => return None,
+            // TODO(EIP-7732) Determine if need a match arm for gloas here
         };
         Some(full_block)
     }
