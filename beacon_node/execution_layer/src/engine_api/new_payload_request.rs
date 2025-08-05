@@ -172,12 +172,13 @@ impl<'block, E: EthSpec> NewPayloadRequest<'block, E> {
     }
 }
 
+//TODO(EIP7732): Consider implmenting these as methods on the NewPayloadRequest struct
 impl<'a, E: EthSpec> TryFrom<BeaconBlockRef<'a, E>> for NewPayloadRequest<'a, E> {
     type Error = BeaconStateError;
 
     fn try_from(block: BeaconBlockRef<'a, E>) -> Result<Self, Self::Error> {
         match block {
-            BeaconBlockRef::Base(_) | BeaconBlockRef::Altair(_) | BeaconBlockRef::Gloas(_) => {
+            BeaconBlockRef::Base(_) | BeaconBlockRef::Altair(_) => {
                 Err(Self::Error::IncorrectStateVariant)
             }
             BeaconBlockRef::Bellatrix(block_ref) => {
@@ -220,6 +221,7 @@ impl<'a, E: EthSpec> TryFrom<BeaconBlockRef<'a, E>> for NewPayloadRequest<'a, E>
                 parent_beacon_block_root: block_ref.parent_root,
                 execution_requests: &block_ref.body.execution_requests,
             })),
+            BeaconBlockRef::Gloas(_) => Err(Self::Error::IncorrectStateVariant),
         }
     }
 }
@@ -240,10 +242,14 @@ impl<'a, E: EthSpec> TryFrom<ExecutionPayloadRef<'a, E>> for NewPayloadRequest<'
             ExecutionPayloadRef::Deneb(_) => Err(Self::Error::IncorrectStateVariant),
             ExecutionPayloadRef::Electra(_) => Err(Self::Error::IncorrectStateVariant),
             ExecutionPayloadRef::Fulu(_) => Err(Self::Error::IncorrectStateVariant),
+            //TODO(EIP7732): Probably time to just get rid of this
             ExecutionPayloadRef::Gloas(_) => Err(Self::Error::IncorrectStateVariant),
         }
     }
 }
+
+// TODO(EIP-7732) build out the following when it's needed like in Mark's branch
+// impl<'a, E: EthSpec> TryFrom<ExecutionEnvelopeRef<'a, E>> for NewPayloadRequest<E> {
 
 #[cfg(test)]
 mod test {

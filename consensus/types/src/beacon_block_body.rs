@@ -61,11 +61,7 @@ pub const BLOB_KZG_COMMITMENTS_INDEX: usize = 11;
         Deneb(metastruct(mappings(beacon_block_body_deneb_fields(groups(fields))))),
         Electra(metastruct(mappings(beacon_block_body_electra_fields(groups(fields))))),
         Fulu(metastruct(mappings(beacon_block_body_fulu_fields(groups(fields))))),
-// we relax the trait bounds for gloas since it doesn't contain a Payload
-        Gloas(
-            derivative(PartialEq, Hash(bound = "E: EthSpec")),
-            metastruct(mappings(beacon_block_body_gloas_fields(groups(fields))))
-        ),
+        Gloas(metastruct(mappings(beacon_block_body_gloas_fields(groups(fields))))),
     ),
     cast_error(ty = "Error", expr = "Error::IncorrectStateVariant"),
     partial_getter_error(ty = "Error", expr = "Error::IncorrectStateVariant")
@@ -131,7 +127,7 @@ pub struct BeaconBlockBody<E: EthSpec, Payload: AbstractExecPayload<E> = FullPay
     #[superstruct(only(Fulu), partial_getter(rename = "execution_payload_fulu"))]
     #[serde(flatten)]
     pub execution_payload: Payload::Fulu,
-    // execution_payload removed from Gloas, replaced with signed_execution_payload_header below
+    // execution_payload removed from Gloas, replaced with signed_execution_bid below
     #[superstruct(only(Capella, Deneb, Electra, Fulu, Gloas))]
     pub bls_to_execution_changes:
         VariableList<SignedBlsToExecutionChange, E::MaxBlsToExecutionChanges>,
@@ -142,7 +138,7 @@ pub struct BeaconBlockBody<E: EthSpec, Payload: AbstractExecPayload<E> = FullPay
     #[superstruct(only(Electra, Fulu))]
     pub execution_requests: ExecutionRequests<E>,
     #[superstruct(only(Gloas))]
-    pub signed_execution_payload_header: SignedExecutionBid,
+    pub signed_execution_bid: SignedExecutionBid,
     #[superstruct(only(Gloas))]
     pub payload_attestations: VariableList<PayloadAttestation<E>, E::MaxPayloadAttestations>,
     #[superstruct(only(Base, Altair, Gloas))]
@@ -168,12 +164,14 @@ impl<E: EthSpec, Payload: AbstractExecPayload<E>> BeaconBlockBody<E, Payload> {
 impl<'a, E: EthSpec, Payload: AbstractExecPayload<E>> BeaconBlockBodyRef<'a, E, Payload> {
     pub fn execution_payload(&self) -> Result<Payload::Ref<'a>, Error> {
         match self {
-            Self::Base(_) | Self::Altair(_) | Self::Gloas(_) => Err(Error::IncorrectStateVariant),
+            Self::Base(_) | Self::Altair(_) => Err(Error::IncorrectStateVariant),
             Self::Bellatrix(body) => Ok(Payload::Ref::from(&body.execution_payload)),
             Self::Capella(body) => Ok(Payload::Ref::from(&body.execution_payload)),
             Self::Deneb(body) => Ok(Payload::Ref::from(&body.execution_payload)),
             Self::Electra(body) => Ok(Payload::Ref::from(&body.execution_payload)),
             Self::Fulu(body) => Ok(Payload::Ref::from(&body.execution_payload)),
+            // TODO(eip-7732): idk if this is right there's no more execution payload
+            Self::Gloas(_) => Err(Error::IncorrectStateVariant),
         }
     }
 
@@ -242,6 +240,7 @@ impl<'a, E: EthSpec, Payload: AbstractExecPayload<E>> BeaconBlockBodyRef<'a, E, 
             | Self::Bellatrix(_)
             | Self::Capella(_)
             | Self::Gloas(_) => Err(Error::IncorrectStateVariant),
+            // TODO(eip-7732): Mark's impl had the Self::EIP-7732 variant below, but I think it should produce error instead since no self.blob_kzg_commitments in BeaconState for gloas
             Self::Deneb(_) | Self::Electra(_) | Self::Fulu(_) => {
                 // We compute the branches by generating 2 merkle trees:
                 // 1. Merkle tree for the `blob_kzg_commitments` List object
@@ -537,7 +536,7 @@ impl<E: EthSpec> From<BeaconBlockBodyGloas<E, BlindedPayload<E>>>
             voluntary_exits,
             sync_aggregate,
             bls_to_execution_changes,
-            signed_execution_payload_header,
+            signed_execution_bid,
             payload_attestations,
             _phantom,
         } = body;
@@ -553,7 +552,7 @@ impl<E: EthSpec> From<BeaconBlockBodyGloas<E, BlindedPayload<E>>>
             voluntary_exits,
             sync_aggregate,
             bls_to_execution_changes,
-            signed_execution_payload_header,
+            signed_execution_bid,
             payload_attestations,
             _phantom: PhantomData,
         }
@@ -871,7 +870,7 @@ impl<E: EthSpec> From<BeaconBlockBodyGloas<E, FullPayload<E>>>
             voluntary_exits,
             sync_aggregate,
             bls_to_execution_changes,
-            signed_execution_payload_header,
+            signed_execution_bid,
             payload_attestations,
             _phantom,
         } = body;
@@ -888,7 +887,7 @@ impl<E: EthSpec> From<BeaconBlockBodyGloas<E, FullPayload<E>>>
                 voluntary_exits,
                 sync_aggregate,
                 bls_to_execution_changes,
-                signed_execution_payload_header,
+                signed_execution_bid,
                 payload_attestations,
                 _phantom: PhantomData,
             },
