@@ -115,11 +115,9 @@ where
         partial_getter(rename = "latest_execution_payload_header_fulu")
     )]
     pub latest_execution_payload_header: ExecutionPayloadHeaderFulu<E>,
-    #[superstruct(
-        only(Gloas),
-        partial_getter(rename = "latest_execution_payload_header_gloas")
-    )]
-    pub latest_execution_payload_header: ExecutionPayloadHeaderGloas<E>,
+
+    #[superstruct(only(Gloas), partial_getter(rename = "latest_execution_bid_gloas"))]
+    pub latest_execution_bid: ExecutionBid,
 
     // Capella
     #[superstruct(only(Capella, Deneb, Electra, Fulu, Gloas))]
@@ -154,6 +152,27 @@ where
     pub pending_consolidations: List<PendingConsolidation, E::PendingConsolidationsLimit>,
     #[superstruct(only(Fulu, Gloas))]
     pub proposer_lookahead: Vector<u64, E::ProposerLookaheadSlots>,
+
+    // Gloas
+    // Gloas
+    #[superstruct(only(Gloas))]
+    pub execution_payload_availability: BitVector<E::SlotsPerHistoricalRoot>,
+
+    #[superstruct(only(Gloas))]
+    pub builder_pending_payments: Vector<BuilderPendingPayment, E::BuilderPendingPaymentsLimit>,
+
+    #[superstruct(only(Gloas))]
+    pub builder_pending_withdrawals:
+        List<BuilderPendingWithdrawal, E::BuilderPendingWithdrawalsLimit>,
+
+    #[superstruct(only(Gloas))]
+    pub latest_block_hash: ExecutionBlockHash,
+
+    #[superstruct(only(Gloas))]
+    pub latest_full_slot: Slot,
+
+    #[superstruct(only(Gloas))]
+    pub latest_withdrawals_root: Hash256,
 }
 
 impl<E: EthSpec> PartialBeaconState<E> {
@@ -465,7 +484,7 @@ impl<E: EthSpec> TryInto<BeaconState<E>> for PartialBeaconState<E> {
                     current_sync_committee,
                     next_sync_committee,
                     inactivity_scores,
-                    latest_execution_payload_header,
+                    latest_execution_bid,
                     next_withdrawal_index,
                     next_withdrawal_validator_index,
                     deposit_requests_start_index,
@@ -477,7 +496,13 @@ impl<E: EthSpec> TryInto<BeaconState<E>> for PartialBeaconState<E> {
                     pending_deposits,
                     pending_partial_withdrawals,
                     pending_consolidations,
-                    proposer_lookahead
+                    proposer_lookahead,
+                    execution_payload_availability,
+                    builder_pending_payments,
+                    builder_pending_withdrawals,
+                    latest_block_hash,
+                    latest_full_slot,
+                    latest_withdrawals_root
                 ],
                 [historical_summaries]
             ),

@@ -673,10 +673,35 @@ impl<E: EthSpec, Payload: AbstractExecPayload<E>> EmptyBlock for BeaconBlockGloa
                 voluntary_exits: VariableList::empty(),
                 sync_aggregate: SyncAggregate::empty(),
                 bls_to_execution_changes: VariableList::empty(),
-                signed_execution_payload_header: SignedExecutionBid::empty(),
+                signed_execution_bid: SignedExecutionBid::empty(),
                 payload_attestations: VariableList::empty(),
                 _phantom: PhantomData,
             },
+        }
+    }
+}
+
+/// TODO(EIP-7732) Mark's branch had the following implementation but not sure if it's needed so will just add header below for reference
+// impl<E: EthSpec, Payload: AbstractExecPayload<E>> BeaconBlockEIP7732<E, Payload> {
+
+impl<E: EthSpec> From<BeaconBlockGloas<E, BlindedPayload<E>>>
+    for BeaconBlockGloas<E, FullPayload<E>>
+{
+    fn from(block: BeaconBlockGloas<E, BlindedPayload<E>>) -> Self {
+        let BeaconBlockGloas {
+            slot,
+            proposer_index,
+            parent_root,
+            state_root,
+            body,
+        } = block;
+
+        BeaconBlockGloas {
+            slot,
+            proposer_index,
+            parent_root,
+            state_root,
+            body: body.into(),
         }
     }
 }
