@@ -395,10 +395,12 @@ pub trait EthSpec: 'static + Default + Sync + Send + Clone + Debug + PartialEq +
         Self::ProposerLookaheadSlots::to_usize()
     }
 
+    /// Returns the `PTCSize` constant for this specification.
     fn ptc_size() -> usize {
         Self::PTCSize::to_usize()
     }
 
+    /// Returns the `MaxPayloadAttestations` constant for this specification.
     fn max_payload_attestations() -> usize {
         Self::MaxPayloadAttestations::to_usize()
     }
@@ -472,7 +474,7 @@ impl EthSpec for MainnetEthSpec {
     type MaxWithdrawalRequestsPerPayload = U16;
     type MaxPendingDepositsPerEpoch = U16;
     type PTCSize = U512;
-    type MaxPayloadAttestations = U2;
+    type MaxPayloadAttestations = U4;
 
     fn default_spec() -> ChainSpec {
         ChainSpec::mainnet()

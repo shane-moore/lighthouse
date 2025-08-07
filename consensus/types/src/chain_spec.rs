@@ -2505,9 +2505,9 @@ mod tests {
             spec.domain_aggregate_and_proof,
             &spec,
         );
+        test_domain(Domain::SyncCommittee, spec.domain_sync_committee, &spec);
         test_domain(Domain::BeaconBuilder, spec.domain_beacon_builder, &spec);
         test_domain(Domain::PTCAttester, spec.domain_ptc_attester, &spec);
-        test_domain(Domain::SyncCommittee, spec.domain_sync_committee, &spec);
 
         // The builder domain index is zero
         let builder_domain_pre_mask = [0; 4];
