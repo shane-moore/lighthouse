@@ -30,7 +30,6 @@ pub mod deneb;
 pub mod errors;
 mod is_valid_indexed_attestation;
 pub mod process_operations;
-pub mod process_withdrawals;
 pub mod signature_sets;
 pub mod tests;
 mod verify_attestation;
@@ -40,6 +39,7 @@ mod verify_deposit;
 mod verify_exit;
 mod verify_proposer_slashing;
 
+use crate::common::decrease_balance;
 use crate::common::update_progressive_balances_cache::{
     initialize_progressive_balances_cache, update_progressive_balances_metrics,
 };
@@ -171,16 +171,9 @@ pub fn per_block_processing<E: EthSpec, Payload: AbstractExecPayload<E>>(
     // previous block.
     if is_execution_enabled(state, block.body()) {
         let body = block.body();
-        if state.fork_name_unchecked().gloas_enabled() {
-            process_withdrawals::gloas::process_withdrawals::<E>(state, spec)?;
-        } else {
-            process_withdrawals::capella::process_withdrawals::<E, Payload>(
-                state,
-                body.execution_payload()?,
-                spec,
-            )?;
-            process_execution_payload::<E, Payload>(state, body, spec)?;
-        }
+        // TODO(EIP-7732): build out process_withdrawals variant for gloas
+        process_withdrawals::<E, Payload>(state, body.execution_payload()?, spec)?;
+        process_execution_payload::<E, Payload>(state, body, spec)?;
     }
 
     // TODO(EIP-7732): build out process_execution_bid
@@ -634,4 +627,70 @@ pub fn get_expected_withdrawals<E: EthSpec>(
     }
 
     Ok((withdrawals.into(), processed_partial_withdrawals_count))
+}
+
+/// Apply withdrawals to the state.
+/// TODO(EIP-7732): abstract this out and create gloas variant
+pub fn process_withdrawals<E: EthSpec, Payload: AbstractExecPayload<E>>(
+    state: &mut BeaconState<E>,
+    payload: Payload::Ref<'_>,
+    spec: &ChainSpec,
+) -> Result<(), BlockProcessingError> {
+    if state.fork_name_unchecked().capella_enabled() {
+        let (expected_withdrawals, processed_partial_withdrawals_count) =
+            get_expected_withdrawals(state, spec)?;
+        let expected_root = expected_withdrawals.tree_hash_root();
+        let withdrawals_root = payload.withdrawals_root()?;
+
+        if expected_root != withdrawals_root {
+            return Err(BlockProcessingError::WithdrawalsRootMismatch {
+                expected: expected_root,
+                found: withdrawals_root,
+            });
+        }
+
+        for withdrawal in expected_withdrawals.iter() {
+            decrease_balance(
+                state,
+                withdrawal.validator_index as usize,
+                withdrawal.amount,
+            )?;
+        }
+
+        // Update pending partial withdrawals [New in Electra:EIP7251]
+        if let Some(processed_partial_withdrawals_count) = processed_partial_withdrawals_count {
+            state
+                .pending_partial_withdrawals_mut()?
+                .pop_front(processed_partial_withdrawals_count)?;
+        }
+
+        // Update the next withdrawal index if this block contained withdrawals
+        if let Some(latest_withdrawal) = expected_withdrawals.last() {
+            *state.next_withdrawal_index_mut()? = latest_withdrawal.index.safe_add(1)?;
+
+            // Update the next validator index to start the next withdrawal sweep
+            if expected_withdrawals.len() == E::max_withdrawals_per_payload() {
+                // Next sweep starts after the latest withdrawal's validator index
+                let next_validator_index = latest_withdrawal
+                    .validator_index
+                    .safe_add(1)?
+                    .safe_rem(state.validators().len() as u64)?;
+                *state.next_withdrawal_validator_index_mut()? = next_validator_index;
+            }
+        }
+
+        // Advance sweep by the max length of the sweep if there was not a full set of withdrawals
+        if expected_withdrawals.len() != E::max_withdrawals_per_payload() {
+            let next_validator_index = state
+                .next_withdrawal_validator_index()?
+                .safe_add(spec.max_validators_per_withdrawals_sweep)?
+                .safe_rem(state.validators().len() as u64)?;
+            *state.next_withdrawal_validator_index_mut()? = next_validator_index;
+        }
+
+        Ok(())
+    } else {
+        // these shouldn't even be encountered but they're here for completeness
+        Ok(())
+    }
 }

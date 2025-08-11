@@ -154,7 +154,6 @@ where
     pub proposer_lookahead: Vector<u64, E::ProposerLookaheadSlots>,
 
     // Gloas
-    // Gloas
     #[superstruct(only(Gloas))]
     pub execution_payload_availability: BitVector<E::SlotsPerHistoricalRoot>,
 
