@@ -2004,18 +2004,6 @@ impl<E: EthSpec> BeaconState<E> {
         }
     }
 
-    /// Get the PTC
-    /// Requires the committee cache to be initialized.
-    /// TODO(EIP-7732): definitely gonna have to cache this..
-    /// TODO(EIP-7732): check this implementation against the latest spec
-    // https://ethereum.github.io/consensus-specs/specs/_features/eip7732/beacon-chain/#new-get_ptc
-    pub fn get_ptc(&self, slot: Slot) -> Result<PTC<E>, Error> {
-        let committee_cache = self.committee_cache_at_slot(slot)?;
-        let committees = committee_cache.get_beacon_committees_at_slot(slot)?;
-
-        PTC::from_committees(&committees)
-    }
-
     /// Build all caches (except the tree hash cache), if they need to be built.
     #[instrument(skip_all, level = "debug")]
     pub fn build_caches(&mut self, spec: &ChainSpec) -> Result<(), Error> {
