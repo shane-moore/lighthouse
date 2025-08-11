@@ -51,7 +51,7 @@ use types::non_zero_usize::new_non_zero_usize;
 use types::payload::BlockProductionVersion;
 use types::{
     AbstractExecPayload, BlobsList, ExecutionPayloadDeneb, ExecutionRequests, KzgProofs,
-    PayloadAttestation, SignedBlindedBeaconBlock, SignedExecutionBid,
+    SignedBlindedBeaconBlock,
 };
 use types::{
     BeaconStateError, BlindedPayload, ChainSpec, Epoch, ExecPayload, ExecutionPayloadBellatrix,
@@ -212,11 +212,6 @@ pub enum BlockProposalContents<E: EthSpec, Payload: AbstractExecPayload<E>> {
         // See: https://github.com/sigp/lighthouse/issues/6981
         requests: Option<ExecutionRequests<E>>,
     },
-    /// Gloas: Execution bid and payload attestations
-    BidAndPayloadAttestations {
-        signed_execution_bid: SignedExecutionBid,
-        payload_attestations: VariableList<PayloadAttestation<E>, E::MaxPayloadAttestations>,
-    },
 }
 
 impl<E: EthSpec> From<BlockProposalContents<E, FullPayload<E>>>
@@ -243,13 +238,6 @@ impl<E: EthSpec> From<BlockProposalContents<E, FullPayload<E>>>
                 kzg_commitments,
                 blobs_and_proofs: None,
                 requests,
-            },
-            BlockProposalContents::BidAndPayloadAttestations {
-                signed_execution_bid,
-                payload_attestations,
-            } => BlockProposalContents::BidAndPayloadAttestations {
-                signed_execution_bid,
-                payload_attestations,
             },
         }
     }
@@ -318,28 +306,6 @@ impl<E: EthSpec, Payload: AbstractExecPayload<E>> BlockProposalContents<E, Paylo
                 requests,
                 block_value,
             ),
-            Self::BidAndPayloadAttestations { .. } => {
-                panic!("Cannot deconstruct BidAndPayloadAttestations variant into execution payload components")
-            }
-        }
-    }
-
-    /// Extract execution bid data for EIP-7732 Gloas blocks
-    pub fn into_execution_bid(
-        self,
-    ) -> Result<
-        (
-            SignedExecutionBid,
-            VariableList<PayloadAttestation<E>, E::MaxPayloadAttestations>,
-        ),
-        &'static str,
-    > {
-        match self {
-            Self::BidAndPayloadAttestations {
-                signed_execution_bid,
-                payload_attestations,
-            } => Ok((signed_execution_bid, payload_attestations)),
-            _ => Err("Cannot extract execution bid from non-BidAndPayloadAttestations variant"),
         }
     }
 
@@ -347,27 +313,18 @@ impl<E: EthSpec, Payload: AbstractExecPayload<E>> BlockProposalContents<E, Paylo
         match self {
             Self::Payload { payload, .. } => payload,
             Self::PayloadAndBlobs { payload, .. } => payload,
-            Self::BidAndPayloadAttestations { .. } => {
-                panic!("BidAndPayloadAttestations variant does not contain execution payload")
-            }
         }
     }
     pub fn to_payload(self) -> Payload {
         match self {
             Self::Payload { payload, .. } => payload,
             Self::PayloadAndBlobs { payload, .. } => payload,
-            Self::BidAndPayloadAttestations { .. } => {
-                panic!("BidAndPayloadAttestations variant does not contain execution payload")
-            }
         }
     }
     pub fn block_value(&self) -> &Uint256 {
         match self {
             Self::Payload { block_value, .. } => block_value,
             Self::PayloadAndBlobs { block_value, .. } => block_value,
-            Self::BidAndPayloadAttestations { .. } => {
-                panic!("BidAndPayloadAttestations variant does not have block_value")
-            }
         }
     }
 }

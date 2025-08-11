@@ -5690,45 +5690,7 @@ impl<T: BeaconChainTypes> BeaconChain<T> {
                     execution_payload_value,
                 )
             }
-            // Below is my attempt at handling the Gloas variant
-            // Note that Mark's implementation had this as:
-            //  BeaconState::EIP7732(_) => todo!("EIP-7732 block production"),
-            BeaconState::Gloas(_) => {
-                // Gloas blocks contain execution bids, not execution payloads
-                let block_proposal_contents =
-                    block_contents.ok_or(BlockProductionError::MissingExecutionBid)?;
-                let (signed_execution_bid, payload_attestations) = block_proposal_contents
-                    .into_execution_bid()
-                    .map_err(|_| BlockProductionError::InvalidPayloadFork)?;
-
-                (
-                    BeaconBlock::Gloas(BeaconBlockGloas {
-                        slot,
-                        proposer_index,
-                        parent_root,
-                        state_root: Hash256::zero(),
-                        body: BeaconBlockBodyGloas {
-                            randao_reveal,
-                            eth1_data,
-                            graffiti,
-                            proposer_slashings: proposer_slashings.into(),
-                            attester_slashings: attester_slashings_electra.into(),
-                            attestations: attestations_electra.into(),
-                            deposits: deposits.into(),
-                            voluntary_exits: voluntary_exits.into(),
-                            sync_aggregate: sync_aggregate
-                                .ok_or(BlockProductionError::MissingSyncAggregate)?,
-                            bls_to_execution_changes: bls_to_execution_changes.into(),
-                            // Gloas: Use actual execution bid data
-                            signed_execution_bid: signed_execution_bid.clone(),
-                            payload_attestations,
-                            _phantom: PhantomData,
-                        },
-                    }),
-                    None,          // blob commitments moved to `ExecutionPayloadEnvelope`
-                    Uint256::ZERO, // No execution payload value for Gloas blocks, just bids value
-                )
-            }
+            BeaconState::Gloas(_) => todo!("Gloas block production"),
         };
 
         let block = SignedBeaconBlock::from_block(
