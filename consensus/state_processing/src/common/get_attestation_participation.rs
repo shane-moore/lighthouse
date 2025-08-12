@@ -9,7 +9,9 @@ use types::{
 };
 use types::{AttestationData, BeaconState, ChainSpec, EthSpec};
 
-/// Get the participation flags for a valid attestation.
+use super::is_attestation_same_slot;
+
+/// Get the participation flags for a valid attestation (supports both pre-EIP-7732 and EIP-7732).
 ///
 /// You should have called `verify_attestation_for_block_inclusion` or similar before
 /// calling this function, in order to ensure that the attestation's source is correct.
@@ -32,8 +34,29 @@ pub fn get_attestation_participation_flag_indices<E: EthSpec>(
     let is_matching_source = data.source == justified_checkpoint;
     let is_matching_target = is_matching_source
         && data.target.root == *state.get_block_root_at_epoch(data.target.epoch)?;
-    let is_matching_head =
+    let is_matching_blockroot =
         is_matching_target && data.beacon_block_root == *state.get_block_root(data.slot)?;
+
+    let is_matching_head = if state.fork_name_unchecked().gloas_enabled() {
+        let is_matching_payload = if is_attestation_same_slot(state, data)? {
+            data.index == 0
+        } else {
+            // Check against historical payload availability (EIP-7732)
+            if let Ok(execution_payload_availability) = state.execution_payload_availability() {
+                let slot_index = data.slot.as_usize() % E::slots_per_historical_root();
+                let payload_status = execution_payload_availability
+                    .get(slot_index)
+                    .map(|b| if b { 1 } else { 0 })
+                    .unwrap_or(0);
+                data.index == payload_status
+            } else {
+                true
+            }
+        };
+        is_matching_blockroot && is_matching_payload
+    } else {
+        is_matching_blockroot
+    };
 
     if !is_matching_source {
         return Err(Error::IncorrectAttestationSource);
@@ -44,6 +67,8 @@ pub fn get_attestation_participation_flag_indices<E: EthSpec>(
     if is_matching_source && inclusion_delay <= E::slots_per_epoch().integer_sqrt() {
         participation_flag_indices.push(TIMELY_SOURCE_FLAG_INDEX);
     }
+    // TODO(EIP-7732): spec says TIMELY_TARGET_FLAG_INDEX should be received like pre-Deneb condition https://ethereum.github.io/consensus-specs/specs/_features/eip7732/beacon-chain/#new-get_attestation_participation_flag_indices
+    // we should check with Potuz if this is intentional or if we need to alter logic below to have the same behavior as pre-Deneb for gloas
     if state.fork_name_unchecked().deneb_enabled() {
         if is_matching_target {
             // [Modified in Deneb:EIP7045]

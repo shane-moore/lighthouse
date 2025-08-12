@@ -161,6 +161,12 @@ impl Validator {
     /// Check if ``validator`` has an 0x02 prefixed "compounding" withdrawal credential.
     pub fn has_compounding_withdrawal_credential(&self, spec: &ChainSpec) -> bool {
         is_compounding_withdrawal_credential(self.withdrawal_credentials, spec)
+            || is_builder_withdrawal_credential(self.withdrawal_credentials, spec)
+    }
+
+    /// Check if ``validator`` has an 0x03 prefixed "builder" withdrawal credential.
+    pub fn has_builder_withdrawal_credential(&self, spec: &ChainSpec) -> bool {
+        is_builder_withdrawal_credential(self.withdrawal_credentials, spec)
     }
 
     /// Get the execution withdrawal address if this validator has one initialized.
@@ -310,6 +316,15 @@ pub fn is_compounding_withdrawal_credential(
         .as_slice()
         .first()
         .map(|prefix_byte| *prefix_byte == spec.compounding_withdrawal_prefix_byte)
+        .unwrap_or(false)
+}
+
+/// Check if the withdrawal credential has the builder withdrawal prefix (0x03).
+pub fn is_builder_withdrawal_credential(withdrawal_credentials: Hash256, spec: &ChainSpec) -> bool {
+    withdrawal_credentials
+        .as_slice()
+        .first()
+        .map(|prefix_byte| *prefix_byte == spec.builder_withdrawal_prefix_byte)
         .unwrap_or(false)
 }
 
