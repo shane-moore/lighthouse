@@ -11,9 +11,9 @@ use types::{
     BeaconStateError, ChainSpec, DepositData, Domain, Epoch, EthSpec, Fork, Hash256,
     InconsistentFork, IndexedAttestation, IndexedAttestationRef, ProposerSlashing, PublicKey,
     PublicKeyBytes, Signature, SignedAggregateAndProof, SignedBeaconBlock, SignedBeaconBlockHeader,
-    SignedBlsToExecutionChange, SignedContributionAndProof, SignedExecutionPayloadEnvelope,
-    SignedRoot, SignedVoluntaryExit, SigningData, Slot, SyncAggregate, SyncAggregatorSelectionData,
-    Unsigned,
+    SignedBlsToExecutionChange, SignedContributionAndProof, SignedExecutionPayloadBid,
+    SignedExecutionPayloadEnvelope, SignedRoot, SignedVoluntaryExit, SigningData, Slot,
+    SyncAggregate, SyncAggregatorSelectionData, Unsigned,
 };
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -355,6 +355,34 @@ where
 
     Ok(SignatureSet::single_pubkey(
         signed_envelope.signature(),
+        pubkey,
+        message,
+    ))
+}
+
+pub fn execution_bid_signature_set<'a, E, F>(
+    state: &'a BeaconState<E>,
+    get_pubkey: F,
+    signed_execution_payload_bid: &'a SignedExecutionPayloadBid,
+    spec: &'a ChainSpec,
+) -> Result<SignatureSet<'a>>
+where
+    E: EthSpec,
+    F: Fn(usize) -> Option<Cow<'a, PublicKey>>,
+{
+    let domain = spec.get_domain(
+        state.current_epoch(),
+        Domain::BeaconBuilder,
+        &state.fork(),
+        state.genesis_validators_root(),
+    );
+    let execution_bid = &signed_execution_payload_bid.message;
+    let pubkey = get_pubkey(execution_bid.builder_index as usize)
+        .ok_or(Error::ValidatorUnknown(execution_bid.builder_index))?;
+    let message = execution_bid.signing_root(domain);
+
+    Ok(SignatureSet::single_pubkey(
+        &signed_execution_payload_bid.signature,
         pubkey,
         message,
     ))
