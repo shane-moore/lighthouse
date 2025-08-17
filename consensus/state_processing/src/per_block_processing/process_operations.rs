@@ -2,10 +2,11 @@ use super::*;
 use crate::VerifySignatures;
 use crate::common::{
     get_attestation_participation_flag_indices, increase_balance, initiate_validator_exit,
-    slash_validator,
+    is_attestation_same_slot, slash_validator,
 };
 use crate::per_block_processing::errors::{BlockProcessingError, IntoWithIndex};
 use crate::per_block_processing::verify_payload_attestation::verify_payload_attestation;
+use safe_arith::ArithError;
 use ssz_types::FixedVector;
 use typenum::U33;
 use types::consts::altair::{PARTICIPATION_FLAG_WEIGHTS, PROPOSER_WEIGHT, WEIGHT_DENOMINATOR};
@@ -176,11 +177,25 @@ pub mod altair_deneb {
 
         // Update epoch participation flags.
         let mut proposer_reward_numerator = 0;
+
+        // Track validators for Gloas pending builder payment logic
+        let mut validators_setting_new_flags_effective_balances =
+            if state.fork_name_unchecked().gloas_enabled() {
+                // TODO(EIP7732): Discuss if want to set capacity to full list of attesters from the attestation
+                Some(Vec::with_capacity(indexed_att.attesting_indices_len()))
+            } else {
+                None
+            };
+
         for index in indexed_att.attesting_indices_iter() {
             let index = *index as usize;
-
             let validator_effective_balance = state.epoch_cache().get_effective_balance(index)?;
             let validator_slashed = state.slashings_cache().is_slashed(index);
+
+            // [New in EIP7732]
+            // For same-slot attestations, check if we're setting any new flags
+            // If we are, this validator hasn't contributed to this slot's quorum yet
+            let mut will_set_new_flag = false;
 
             for (flag_index, &weight) in PARTICIPATION_FLAG_WEIGHTS.iter().enumerate() {
                 let epoch_participation = state.get_epoch_participation_mut(
@@ -206,7 +221,20 @@ pub mod altair_deneb {
                             validator_effective_balance,
                             validator_slashed,
                         )?;
+
+                        will_set_new_flag = true;
                     }
+                }
+            }
+
+            // Collect validators for Gloas builder payment processing
+            if let Some(ref mut effective_balances) =
+                validators_setting_new_flags_effective_balances
+            {
+                // We will only add weight for same-slot attestations when any new flag is set
+                // This ensures each validator contributes exactly once per slot
+                if will_set_new_flag && is_attestation_same_slot(state, data)? {
+                    effective_balances.push(validator_effective_balance);
                 }
             }
         }
@@ -217,6 +245,38 @@ pub mod altair_deneb {
             .safe_div(PROPOSER_WEIGHT)?;
         let proposer_reward = proposer_reward_numerator.safe_div(proposer_reward_denominator)?;
         increase_balance(state, proposer_index as usize, proposer_reward)?;
+
+        // [New in EIP-7732] Process builder payments
+        if let Some(effective_balances) = validators_setting_new_flags_effective_balances {
+            process_builder_payments_for_attestation(state, effective_balances, data, spec)?;
+        }
+
+        Ok(())
+    }
+
+    /// Process builder payments for validators who set new participation flags in Gloas fork
+    fn process_builder_payments_for_attestation<E: EthSpec>(
+        state: &mut BeaconState<E>,
+        effective_balances: Vec<u64>,
+        data: &AttestationData,
+        _spec: &ChainSpec,
+    ) -> Result<(), BlockProcessingError> {
+        let current_epoch_target = data.target.epoch == state.current_epoch();
+        let payment_index = if current_epoch_target {
+            E::slots_per_epoch() + data.slot.as_u64() % E::slots_per_epoch()
+        } else {
+            data.slot.as_u64() % E::slots_per_epoch()
+        };
+
+        if let Ok(builder_payments) = state.builder_pending_payments_mut() {
+            if let Some(payment) = builder_payments.get_mut(payment_index as usize) {
+                effective_balances.iter().try_for_each(|&balance| {
+                    payment.weight = payment.weight.safe_add(balance)?;
+                    Ok::<(), ArithError>(())
+                })?;
+            }
+        }
+
         Ok(())
     }
 }
