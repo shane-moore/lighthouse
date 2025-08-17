@@ -331,7 +331,10 @@ pub enum AttestationInvalid {
         attestation: Slot,
     },
     /// Attestation slot is too far in the past to be included in a block.
-    IncludedTooLate { state: Slot, attestation: Slot },
+    IncludedTooLate {
+        state: Slot,
+        attestation: Slot,
+    },
     /// Attestation target epoch does not match attestation slot.
     TargetEpochSlotMismatch {
         target_epoch: Epoch,
@@ -364,6 +367,7 @@ pub enum AttestationInvalid {
     BadSignature,
     /// The indexed attestation created from this attestation was found to be invalid.
     BadIndexedAttestation(IndexedAttestationInvalid),
+    BadOverloadedDataIndex,
 }
 
 impl From<BlockOperationError<IndexedAttestationInvalid>>

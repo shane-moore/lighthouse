@@ -188,6 +188,8 @@ pub enum Error {
     ProposerLookaheadOutOfBounds {
         i: usize,
     },
+    PleaseNotifyTheDevs(String),
+    InvalidExecutionPayloadAvailabilityIndex(usize),
 }
 
 /// Control whether an epoch-indexed field can be indexed at the next epoch or not.
