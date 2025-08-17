@@ -174,6 +174,7 @@ pub enum Error {
         aggregator_index: u64,
     },
     PleaseNotifyTheDevs(String),
+    InvalidExecutionPayloadAvailabilityIndex(usize),
 }
 
 /// Control whether an epoch-indexed field can be indexed at the next epoch or not.

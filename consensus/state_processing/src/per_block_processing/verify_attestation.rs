@@ -63,18 +63,23 @@ pub fn verify_attestation_for_state<'ctxt, E: EthSpec>(
 ) -> Result<IndexedAttestationRef<'ctxt, E>> {
     let data = attestation.data();
 
-    // NOTE: choosing a validation based on the attestation's fork
-    // rather than the state's fork makes this simple, but technically the spec
-    // defines this verification based on the state's fork.
-    match attestation {
-        AttestationRef::Base(_) => {
+    // TODO(EIP7732): modifying this to verify data.index based on fork as opposed to Attestation variant since we haven't modified Attestation superstruct since Electra. just checking if this is ok
+    match state.fork_name_unchecked() {
+        ForkName::Base
+        | ForkName::Altair
+        | ForkName::Bellatrix
+        | ForkName::Capella
+        | ForkName::Deneb => {
             verify!(
                 data.index < state.get_committee_count_at_slot(data.slot)?,
                 Invalid::BadCommitteeIndex
             );
         }
-        AttestationRef::Electra(_) => {
+        ForkName::Electra | ForkName::Fulu => {
             verify!(data.index == 0, Invalid::BadCommitteeIndex);
+        }
+        ForkName::Gloas => {
+            verify!(data.index < 2, Invalid::BadOverloadedDataIndex);
         }
     }
 

@@ -9,6 +9,8 @@ use types::{
 };
 use types::{AttestationData, BeaconState, ChainSpec, EthSpec};
 
+use crate::common::is_attestation_same_slot;
+
 /// Get the participation flags for a valid attestation.
 ///
 /// You should have called `verify_attestation_for_block_inclusion` or similar before
@@ -16,6 +18,7 @@ use types::{AttestationData, BeaconState, ChainSpec, EthSpec};
 ///
 /// This function will return an error if the source of the attestation doesn't match the
 /// state's relevant justified checkpoint.
+/// TODO(EIP7732) the spec calls this a new function, but it is existing function. should we make pr to the spec to fix? https://ethereum.github.io/consensus-specs/specs/_features/eip7732/beacon-chain/#new-get_attestation_participation_flag_indices
 pub fn get_attestation_participation_flag_indices<E: EthSpec>(
     state: &BeaconState<E>,
     data: &AttestationData,
@@ -32,8 +35,31 @@ pub fn get_attestation_participation_flag_indices<E: EthSpec>(
     let is_matching_source = data.source == justified_checkpoint;
     let is_matching_target = is_matching_source
         && data.target.root == *state.get_block_root_at_epoch(data.target.epoch)?;
-    let is_matching_head =
+
+    let is_matching_blockroot =
         is_matching_target && data.beacon_block_root == *state.get_block_root(data.slot)?;
+
+    let is_matching_head = if state.fork_name_unchecked().gloas_enabled() {
+        let is_matching_payload = if is_attestation_same_slot(state, data)? {
+            // For same-slot attestations, data.index must be 0
+            if data.index != 0 {
+                // TODO(EIP7732): consider if we want to use a different error type, since this is more of an overloaded data index scenario as opposed to the InvalidCommitteeIndex previous error. It's more like `AttestationInvalid::BadOverloadedDataIndex`
+                return Err(Error::InvalidCommitteeIndex(data.index));
+            }
+            true
+        } else {
+            // For non same-slot attestations, check execution payload availability
+            // TODO(EIP7732) Discuss if we want to return new error BeaconStateError::InvalidExecutionPayloadAvailabilityIndex here for bit out of bounds or use something like BeaconStateError::InvalidBitfield
+            let slot_index = data.slot.as_usize() % E::slots_per_historical_root();
+            state
+                .execution_payload_availability()?
+                .get(slot_index)
+                .map_err(|_| Error::InvalidExecutionPayloadAvailabilityIndex(slot_index))?
+        };
+        is_matching_blockroot && is_matching_payload
+    } else {
+        is_matching_blockroot
+    };
 
     if !is_matching_source {
         return Err(Error::IncorrectAttestationSource);
@@ -45,6 +71,8 @@ pub fn get_attestation_participation_flag_indices<E: EthSpec>(
         participation_flag_indices.push(TIMELY_SOURCE_FLAG_INDEX);
     }
     if state.fork_name_unchecked().deneb_enabled() {
+        // TODO(EIP7732): gloas spec has is_matching_target and inclusion_delay <= SLOTS_PER_EPOCH check here, but in deneb, we removed the inclusion_delay check. perhaps the spec made a mistake. Could make a pr if think that's the case or clarify with Potuz
+        // https://ethereum.github.io/consensus-specs/specs/_features/eip7732/beacon-chain/#new-get_attestation_participation_flag_indices
         if is_matching_target {
             // [Modified in Deneb:EIP7045]
             participation_flag_indices.push(TIMELY_TARGET_FLAG_INDEX);
