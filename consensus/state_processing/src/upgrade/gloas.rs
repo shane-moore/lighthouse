@@ -1,8 +1,8 @@
 use bls::Hash256;
 use std::mem;
 use types::{
-    BeaconState, BeaconStateError as Error, BeaconStateGloas, BitVector, ChainSpec, EthSpec,
-    ExecutionBid, Fork, List, Vector,
+    BeaconState, BeaconStateError as Error, BeaconStateGloas, BitVector, BuilderPendingPayment,
+    ChainSpec, EthSpec, ExecutionBid, Fork, List, Vector,
 };
 
 /// Transform a `Fulu` state into a `Gloas` state.
@@ -85,10 +85,12 @@ pub fn upgrade_state_to_gloas<E: EthSpec>(
         pending_consolidations: pre.pending_consolidations.clone(),
         // Gloas
         execution_payload_availability: BitVector::default(), // All bits set to false initially
-        builder_pending_payments: Vector::default(),          // Empty vector initially,
-        builder_pending_withdrawals: List::default(),         // Empty list initially,
+        builder_pending_payments: Vector::new(vec![
+            BuilderPendingPayment::default();
+            2 * E::slots_per_epoch() as usize
+        ])?,
+        builder_pending_withdrawals: List::default(), // Empty list initially,
         latest_block_hash: pre.latest_execution_payload_header.block_hash,
-        latest_full_slot: pre.slot,
         latest_withdrawals_root: Hash256::default(),
         // Caches
         total_active_balance: pre.total_active_balance,
