@@ -625,7 +625,7 @@ pub fn get_expected_withdrawals<E: EthSpec>(
                         index: withdrawal_index,
                         validator_index: withdrawal.validator_index,
                         address: validator
-                            .get_execution_withdrawal_address(spec)
+                            .get_execution_withdrawal_address(spec, state.fork_name_unchecked())
                             .ok_or(BeaconStateError::NonExecutionAddressWithdrawalCredential)?,
                         amount: withdrawable_balance,
                     });
@@ -662,7 +662,7 @@ pub fn get_expected_withdrawals<E: EthSpec>(
                 index: withdrawal_index,
                 validator_index,
                 address: validator
-                    .get_execution_withdrawal_address(spec)
+                    .get_execution_withdrawal_address(spec, state.fork_name_unchecked())
                     .ok_or(BlockProcessingError::WithdrawalCredentialsInvalid)?,
                 amount: balance,
             });
@@ -672,7 +672,7 @@ pub fn get_expected_withdrawals<E: EthSpec>(
                 index: withdrawal_index,
                 validator_index,
                 address: validator
-                    .get_execution_withdrawal_address(spec)
+                    .get_execution_withdrawal_address(spec, state.fork_name_unchecked())
                     .ok_or(BlockProcessingError::WithdrawalCredentialsInvalid)?,
                 amount: balance.safe_sub(validator.get_max_effective_balance(spec, fork_name))?,
             });
@@ -733,11 +733,13 @@ pub fn process_execution_bid<E: EthSpec, Payload: AbstractExecPayload<E>>(
 
     // For self-builds, amount must be zero regardless of withdrawal credential prefix
     if builder_index == block.proposer_index() {
-        block_verify!(amount == 0, BlockProcessingError::ExecutionInvalid);
+        block_verify!(amount == 0, ExecutionPayloadBidInvalid::BadAmount.into());
     } else {
         // Non-self builds require builder withdrawal credential
-        // TODO(EIP7732): Add proper validation for builder withdrawal credentials via building out helper function has_builder_withdrawal_credential(builder)
-        // https://ethereum.github.io/consensus-specs/specs/_features/eip7732/beacon-chain/#new-has_builder_withdrawal_credential
+        block_verify!(
+            builder.has_builder_withdrawal_credential(spec),
+            ExecutionPayloadBidInvalid::BadWithdrawalCredentials.into()
+        );
     }
 
     // Check that the builder is active, non-slashed, and has funds to cover the bid
