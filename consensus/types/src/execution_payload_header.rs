@@ -512,7 +512,6 @@ impl<'de, E: EthSpec> ContextDeserialize<'de, ForkName> for ExecutionPayloadHead
                 Self::Fulu(Deserialize::deserialize(deserializer).map_err(convert_err)?)
             }
 
-            // FIXME(EIP7732): Check this
             ForkName::Base | ForkName::Altair | ForkName::Gloas => {
                 return Err(serde::de::Error::custom(format!(
                     "ExecutionPayloadHeader failed to deserialize: unsupported fork '{}'",

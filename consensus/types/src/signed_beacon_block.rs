@@ -649,6 +649,7 @@ impl<E: EthSpec> SignedBeaconBlockFulu<E, BlindedPayload<E>> {
 }
 
 // We can convert gloas blocks without payloads into blocks "with" payloads.
+// TODO(EIP-7732) Look into whether we can remove this in the future since no blinded blocks post-gloas
 impl<E: EthSpec> From<SignedBeaconBlockGloas<E, BlindedPayload<E>>>
     for SignedBeaconBlockGloas<E, FullPayload<E>>
 {

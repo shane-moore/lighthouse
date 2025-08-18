@@ -1090,7 +1090,7 @@ impl<E: EthSpec> BeaconState<E> {
             BeaconState::Fulu(state) => Ok(ExecutionPayloadHeaderRef::Fulu(
                 &state.latest_execution_payload_header,
             )),
-            // FIXME(EIP-7732): this is only to make the code compile, needs to be written later
+            // TODO(EIP-7732): investigate calling functions
             BeaconState::Gloas(_) => Err(Error::IncorrectStateVariant),
         }
     }
@@ -1115,7 +1115,7 @@ impl<E: EthSpec> BeaconState<E> {
             BeaconState::Fulu(state) => Ok(ExecutionPayloadHeaderRefMut::Fulu(
                 &mut state.latest_execution_payload_header,
             )),
-            // FIXME(EIP-7732): this is only to make the code compile, needs to be written later
+            // TODO(EIP-7732): investigate calling functions
             BeaconState::Gloas(_) => Err(Error::IncorrectStateVariant),
         }
     }
@@ -1847,7 +1847,6 @@ impl<E: EthSpec> BeaconState<E> {
             | BeaconState::Altair(_)
             | BeaconState::Bellatrix(_)
             | BeaconState::Capella(_) => self.get_validator_churn_limit(spec)?,
-            // FIXME(EIP-7732): check this
             BeaconState::Deneb(_)
             | BeaconState::Electra(_)
             | BeaconState::Fulu(_)
