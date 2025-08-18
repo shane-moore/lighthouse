@@ -451,8 +451,12 @@ pub enum ExitInvalid {
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum ExecutionPayloadBidInvalid {
+    /// The builder sent a 0 amount
+    BadAmount,
     /// The signature is invalid.
     BadSignature,
+    /// The builder's withdrawal credential is invalid
+    BadWithdrawalCredentials,
     /// The builder is not an active validator.
     BuilderNotActive(u64),
     /// The builder is slashed
