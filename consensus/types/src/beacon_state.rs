@@ -599,11 +599,6 @@ where
     #[test_random(default)]
     #[superstruct(only(Gloas))]
     #[metastruct(exclude_from(tree_lists))]
-    pub latest_full_slot: Slot,
-
-    #[test_random(default)]
-    #[superstruct(only(Gloas))]
-    #[metastruct(exclude_from(tree_lists))]
     pub latest_withdrawals_root: Hash256,
 
     // Caching (not in the spec)

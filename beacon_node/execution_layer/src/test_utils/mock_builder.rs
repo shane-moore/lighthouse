@@ -439,7 +439,7 @@ impl<E: EthSpec> MockBuilder<E> {
         block: SignedBlindedBeaconBlock<E>,
     ) -> Result<FullPayloadContents<E>, String> {
         let root = match &block {
-            SignedBlindedBeaconBlock::Base(_) | SignedBlindedBeaconBlock::Altair(_) => {
+            SignedBlindedBeaconBlock::Base(_) | types::SignedBeaconBlock::Altair(_) => {
                 return Err("invalid fork".to_string());
             }
             SignedBlindedBeaconBlock::Bellatrix(block) => {
@@ -846,10 +846,6 @@ impl<E: EthSpec> MockBuilder<E> {
             // first to avoid polluting the execution block generator with invalid payload attributes
             // NOTE: this was part of an effort to add payload attribute uniqueness checks,
             // which was abandoned because it broke too many tests in subtle ways.
-            ForkName::Gloas => {
-                // TODO(EIP7732) Check if this is how we want to do error handling for gloas
-                return Err("invalid fork".to_string());
-            }
             ForkName::Bellatrix | ForkName::Capella => PayloadAttributes::new(
                 timestamp,
                 *prev_randao,
@@ -857,11 +853,16 @@ impl<E: EthSpec> MockBuilder<E> {
                 expected_withdrawals,
                 None,
             ),
-            ForkName::Deneb
-            | ForkName::Electra
-            | ForkName::Fulu
-            | ForkName::Base
-            | ForkName::Altair => {
+            ForkName::Deneb | ForkName::Electra | ForkName::Fulu | ForkName::Gloas => {
+                PayloadAttributes::new(
+                    timestamp,
+                    *prev_randao,
+                    fee_recipient,
+                    expected_withdrawals,
+                    Some(head_block_root),
+                )
+            }
+            ForkName::Base | ForkName::Altair => {
                 return Err("invalid fork".to_string());
             }
         };

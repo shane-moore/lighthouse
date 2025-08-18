@@ -168,9 +168,6 @@ where
     pub latest_block_hash: ExecutionBlockHash,
 
     #[superstruct(only(Gloas))]
-    pub latest_full_slot: Slot,
-
-    #[superstruct(only(Gloas))]
     pub latest_withdrawals_root: Hash256,
 }
 
@@ -501,7 +498,6 @@ impl<E: EthSpec> TryInto<BeaconState<E>> for PartialBeaconState<E> {
                     builder_pending_payments,
                     builder_pending_withdrawals,
                     latest_block_hash,
-                    latest_full_slot,
                     latest_withdrawals_root
                 ],
                 [historical_summaries]
