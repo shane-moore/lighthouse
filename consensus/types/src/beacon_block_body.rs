@@ -170,7 +170,6 @@ impl<'a, E: EthSpec, Payload: AbstractExecPayload<E>> BeaconBlockBodyRef<'a, E, 
             Self::Deneb(body) => Ok(Payload::Ref::from(&body.execution_payload)),
             Self::Electra(body) => Ok(Payload::Ref::from(&body.execution_payload)),
             Self::Fulu(body) => Ok(Payload::Ref::from(&body.execution_payload)),
-            // TODO(eip-7732): idk if this is right there's no more execution payload
             Self::Gloas(_) => Err(Error::IncorrectStateVariant),
         }
     }
@@ -229,6 +228,7 @@ impl<'a, E: EthSpec, Payload: AbstractExecPayload<E>> BeaconBlockBodyRef<'a, E, 
 
     /// Produces the proof of inclusion for a `KzgCommitment` in `self.blob_kzg_commitments`
     /// at `index` using an existing proof for the `blob_kzg_commitments` field.
+    /// TODO(EIP7732) Investigate calling functions since this will no longer work for glas since no block_kzg_commitments in the body anymore
     pub fn complete_kzg_commitment_merkle_proof(
         &self,
         index: usize,
@@ -240,7 +240,6 @@ impl<'a, E: EthSpec, Payload: AbstractExecPayload<E>> BeaconBlockBodyRef<'a, E, 
             | Self::Bellatrix(_)
             | Self::Capella(_)
             | Self::Gloas(_) => Err(Error::IncorrectStateVariant),
-            // TODO(eip-7732): Mark's impl had the Self::EIP-7732 variant below, but I think it should produce error instead since no self.blob_kzg_commitments in BeaconState for gloas
             Self::Deneb(_) | Self::Electra(_) | Self::Fulu(_) => {
                 // We compute the branches by generating 2 merkle trees:
                 // 1. Merkle tree for the `blob_kzg_commitments` List object
@@ -521,6 +520,7 @@ impl<E: EthSpec> From<BeaconBlockBodyAltair<E, BlindedPayload<E>>>
 }
 
 // Post-Fulu block bodies without payloads can be converted into block bodies with payloads
+// TODO(EIP-7732) Look into whether we can remove this in the future since no blinded blocks post-gloas
 impl<E: EthSpec> From<BeaconBlockBodyGloas<E, BlindedPayload<E>>>
     for BeaconBlockBodyGloas<E, FullPayload<E>>
 {
