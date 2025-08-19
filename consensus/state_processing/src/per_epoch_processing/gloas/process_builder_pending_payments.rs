@@ -1,11 +1,13 @@
-use super::Error;
+use crate::EpochProcessingError;
 use safe_arith::SafeArith;
 use types::{BeaconState, BuilderPendingPayment, ChainSpec, EthSpec, Vector};
 
+/// TODO(EIP-7732): Add EF consensus-spec tests for `process_builder_pending_payments`
+/// Currently blocked by EF consensus-spec-tests for Gloas not yet integrated.
 pub fn process_builder_pending_payments<E: EthSpec>(
     state: &mut BeaconState<E>,
     spec: &ChainSpec,
-) -> Result<(), Error> {
+) -> Result<(), EpochProcessingError> {
     let quorum = get_builder_payment_quorum_threshold(state, spec)?;
 
     // Collect qualifying payments
@@ -18,9 +20,8 @@ pub fn process_builder_pending_payments<E: EthSpec>(
         .collect::<Vec<_>>();
 
     // Update `builder_pending_withdrawals` with qualifying `builder_pending_payments`
-    qualifying_payments
-        .into_iter()
-        .try_for_each(|payment| -> Result<(), Error> {
+    qualifying_payments.into_iter().try_for_each(
+        |payment| -> Result<(), EpochProcessingError> {
             let exit_queue_epoch =
                 state.compute_exit_epoch_and_update_churn(payment.withdrawal.amount, spec)?;
             let withdrawable_epoch =
@@ -30,7 +31,8 @@ pub fn process_builder_pending_payments<E: EthSpec>(
             withdrawal.withdrawable_epoch = withdrawable_epoch;
             state.builder_pending_withdrawals_mut()?.push(withdrawal)?;
             Ok(())
-        })?;
+        },
+    )?;
 
     // Move remaining `builder_pending_payments` to start of list and set the rest to default
     let new_payments = state
@@ -49,7 +51,7 @@ pub fn process_builder_pending_payments<E: EthSpec>(
 pub fn get_builder_payment_quorum_threshold<E: EthSpec>(
     state: &BeaconState<E>,
     spec: &ChainSpec,
-) -> Result<u64, Error> {
+) -> Result<u64, EpochProcessingError> {
     let total_active_balance = state.get_total_active_balance()?;
 
     let quorum = total_active_balance
@@ -58,5 +60,5 @@ pub fn get_builder_payment_quorum_threshold<E: EthSpec>(
 
     quorum
         .safe_div(spec.builder_payment_threshold_denominator)
-        .map_err(Error::from)
+        .map_err(EpochProcessingError::from)
 }

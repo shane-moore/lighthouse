@@ -6,13 +6,13 @@ use crate::epoch_cache::initialize_epoch_cache;
 use crate::per_epoch_processing::single_pass::{SinglePassConfig, process_epoch_single_pass};
 use crate::per_epoch_processing::{
     capella::process_historical_summaries_update,
+    gloas::process_builder_pending_payments,
     historical_roots_update::process_historical_roots_update,
     resets::{process_eth1_data_reset, process_randao_mixes_reset, process_slashings_reset},
 };
 pub use inactivity_updates::process_inactivity_updates_slow;
 pub use justification_and_finalization::process_justification_and_finalization;
 pub use participation_flag_updates::process_participation_flag_updates;
-pub use process_builder_pending_payments::process_builder_pending_payments;
 pub use rewards_and_penalties::process_rewards_and_penalties_slow;
 pub use sync_committee_updates::process_sync_committee_updates;
 use types::{BeaconState, ChainSpec, EthSpec, RelativeEpoch};
@@ -20,7 +20,6 @@ use types::{BeaconState, ChainSpec, EthSpec, RelativeEpoch};
 pub mod inactivity_updates;
 pub mod justification_and_finalization;
 pub mod participation_flag_updates;
-pub mod process_builder_pending_payments;
 pub mod rewards_and_penalties;
 pub mod sync_committee_updates;
 
@@ -79,7 +78,8 @@ pub fn process_epoch<E: EthSpec>(
 
     process_sync_committee_updates(state, spec)?;
 
-    if state.fork_name_unchecked().gloas_enabled() {
+    if state.builder_pending_payments().is_ok() {
+        // Post-Gloas
         process_builder_pending_payments(state, spec)?;
     }
 
