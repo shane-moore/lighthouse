@@ -12,6 +12,7 @@ use crate::per_epoch_processing::{
 pub use inactivity_updates::process_inactivity_updates_slow;
 pub use justification_and_finalization::process_justification_and_finalization;
 pub use participation_flag_updates::process_participation_flag_updates;
+pub use process_builder_pending_payments::process_builder_pending_payments;
 pub use rewards_and_penalties::process_rewards_and_penalties_slow;
 pub use sync_committee_updates::process_sync_committee_updates;
 use types::{BeaconState, ChainSpec, EthSpec, RelativeEpoch};
@@ -19,6 +20,7 @@ use types::{BeaconState, ChainSpec, EthSpec, RelativeEpoch};
 pub mod inactivity_updates;
 pub mod justification_and_finalization;
 pub mod participation_flag_updates;
+pub mod process_builder_pending_payments;
 pub mod rewards_and_penalties;
 pub mod sync_committee_updates;
 
@@ -76,6 +78,10 @@ pub fn process_epoch<E: EthSpec>(
     process_participation_flag_updates(state)?;
 
     process_sync_committee_updates(state, spec)?;
+
+    if state.fork_name_unchecked().gloas_enabled() {
+        process_builder_pending_payments(state, spec)?;
+    }
 
     // Rotate the epoch caches to suit the epoch transition.
     state.advance_caches()?;
