@@ -14,6 +14,7 @@ pub struct PayloadAttestationData {
     pub beacon_block_root: Hash256,
     pub slot: Slot,
     pub payload_present: bool,
+    pub blob_data_available: bool,
 }
 
 impl SignedRoot for PayloadAttestationData {}

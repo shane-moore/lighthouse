@@ -168,6 +168,7 @@ pub trait EthSpec: 'static + Default + Sync + Send + Clone + Debug + PartialEq +
      */
     type PTCSize: Unsigned + Clone + Sync + Send + Debug + PartialEq;
     type MaxPayloadAttestations: Unsigned + Clone + Sync + Send + Debug + PartialEq;
+    type BuilderPendingPaymentsLimit: Unsigned + Clone + Sync + Send + Debug + PartialEq;
     type BuilderPendingWithdrawalsLimit: Unsigned + Clone + Sync + Send + Debug + PartialEq;
 
     fn default_spec() -> ChainSpec;
@@ -394,10 +395,12 @@ pub trait EthSpec: 'static + Default + Sync + Send + Clone + Debug + PartialEq +
         Self::ProposerLookaheadSlots::to_usize()
     }
 
+    /// Returns the `PTCSize` constant for this specification.
     fn ptc_size() -> usize {
         Self::PTCSize::to_usize()
     }
 
+    /// Returns the `MaxPayloadAttestations` constant for this specification.
     fn max_payload_attestations() -> usize {
         Self::MaxPayloadAttestations::to_usize()
     }
@@ -430,6 +433,7 @@ impl EthSpec for MainnetEthSpec {
     type EpochsPerSlashingsVector = U8192;
     type HistoricalRootsLimit = U16777216;
     type ValidatorRegistryLimit = U1099511627776;
+    type BuilderPendingPaymentsLimit = U64; // 2 * SLOTS_PER_EPOCH = 2 * 32 = 64
     type BuilderPendingWithdrawalsLimit = U1048576;
     type MaxProposerSlashings = U16;
     type MaxAttesterSlashings = U2;
@@ -470,7 +474,7 @@ impl EthSpec for MainnetEthSpec {
     type MaxWithdrawalRequestsPerPayload = U16;
     type MaxPendingDepositsPerEpoch = U16;
     type PTCSize = U512;
-    type MaxPayloadAttestations = U2;
+    type MaxPayloadAttestations = U4;
 
     fn default_spec() -> ChainSpec {
         ChainSpec::mainnet()
@@ -511,6 +515,7 @@ impl EthSpec for MinimalEthSpec {
     type BytesPerCell = U2048;
     type KzgCommitmentsInclusionProofDepth = U4;
     type ProposerLookaheadSlots = U16; // Derived from (MIN_SEED_LOOKAHEAD + 1) * SLOTS_PER_EPOCH
+    type BuilderPendingPaymentsLimit = U16; // 2 * SLOTS_PER_EPOCH = 2 * 8 = 16
 
     params_from_eth_spec!(MainnetEthSpec {
         JustificationBitsLength,
@@ -573,6 +578,7 @@ impl EthSpec for GnosisEthSpec {
     type EpochsPerSlashingsVector = U8192;
     type HistoricalRootsLimit = U16777216;
     type ValidatorRegistryLimit = U1099511627776;
+    type BuilderPendingPaymentsLimit = U32; // 2 * SLOTS_PER_EPOCH = 2 * 16 = 32
     type BuilderPendingWithdrawalsLimit = U1048576;
     type MaxProposerSlashings = U16;
     type MaxAttesterSlashings = U2;

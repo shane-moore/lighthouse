@@ -54,8 +54,6 @@ impl<E: EthSpec> SignedExecutionPayloadEnvelope<E> {
             Self::NextFork(ref signed) => ExecutionPayloadEnvelopeRef::NextFork(&signed.message),
         }
     }
-
-    // todo(eip-7732): implement verify_signature since spec calls for verify_execution_payload_envelope_signature
 }
 
 impl<'de, E: EthSpec> ContextDeserialize<'de, ForkName> for SignedExecutionPayloadEnvelope<E> {

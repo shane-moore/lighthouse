@@ -515,14 +515,9 @@ where
     )]
     #[metastruct(exclude_from(tree_lists))]
     pub latest_execution_payload_header: ExecutionPayloadHeaderFulu<E>,
-    #[superstruct(
-        only(Gloas),
-        partial_getter(rename = "latest_execution_payload_header_gloas")
-    )]
+    #[superstruct(only(Gloas))]
     #[metastruct(exclude_from(tree_lists))]
-    pub latest_execution_payload_header: ExecutionPayloadHeaderGloas<E>,
-
-    // Capella
+    pub latest_execution_bid: ExecutionBid,
     #[superstruct(only(Capella, Deneb, Electra, Fulu, Gloas), partial_getter(copy))]
     #[serde(with = "serde_utils::quoted_u64")]
     #[metastruct(exclude_from(tree_lists))]
@@ -580,6 +575,31 @@ where
     pub proposer_lookahead: Vector<u64, E::ProposerLookaheadSlots>,
 
     // Gloas
+    #[test_random(default)]
+    #[superstruct(only(Gloas))]
+    #[metastruct(exclude_from(tree_lists))]
+    pub execution_payload_availability: BitVector<E::SlotsPerHistoricalRoot>,
+
+    #[compare_fields(as_iter)]
+    #[test_random(default)]
+    #[superstruct(only(Gloas))]
+    pub builder_pending_payments: Vector<BuilderPendingPayment, E::BuilderPendingPaymentsLimit>,
+
+    #[compare_fields(as_iter)]
+    #[test_random(default)]
+    #[superstruct(only(Gloas))]
+    pub builder_pending_withdrawals:
+        List<BuilderPendingWithdrawal, E::BuilderPendingWithdrawalsLimit>,
+
+    #[test_random(default)]
+    #[superstruct(only(Gloas))]
+    #[metastruct(exclude_from(tree_lists))]
+    pub latest_block_hash: ExecutionBlockHash,
+
+    #[test_random(default)]
+    #[superstruct(only(Gloas))]
+    #[metastruct(exclude_from(tree_lists))]
+    pub latest_withdrawals_root: Hash256,
 
     // Caching (not in the spec)
     #[serde(skip_serializing, skip_deserializing)]
@@ -1070,9 +1090,8 @@ impl<E: EthSpec> BeaconState<E> {
             BeaconState::Fulu(state) => Ok(ExecutionPayloadHeaderRef::Fulu(
                 &state.latest_execution_payload_header,
             )),
-            BeaconState::Gloas(state) => Ok(ExecutionPayloadHeaderRef::Gloas(
-                &state.latest_execution_payload_header,
-            )),
+            // TODO(EIP-7732): investigate calling functions
+            BeaconState::Gloas(_) => Err(Error::IncorrectStateVariant),
         }
     }
 
@@ -1096,9 +1115,8 @@ impl<E: EthSpec> BeaconState<E> {
             BeaconState::Fulu(state) => Ok(ExecutionPayloadHeaderRefMut::Fulu(
                 &mut state.latest_execution_payload_header,
             )),
-            BeaconState::Gloas(state) => Ok(ExecutionPayloadHeaderRefMut::Gloas(
-                &mut state.latest_execution_payload_header,
-            )),
+            // TODO(EIP-7732): investigate calling functions
+            BeaconState::Gloas(_) => Err(Error::IncorrectStateVariant),
         }
     }
 
@@ -2100,6 +2118,20 @@ impl<E: EthSpec> BeaconState<E> {
             RelativeEpoch::Previous => 0,
             RelativeEpoch::Current => 1,
             RelativeEpoch::Next => 2,
+        }
+    }
+
+    pub fn is_parent_block_full(&self) -> bool {
+        match self {
+            BeaconState::Base(_) | BeaconState::Altair(_) => false,
+            BeaconState::Bellatrix(_)
+            | BeaconState::Capella(_)
+            | BeaconState::Deneb(_)
+            | BeaconState::Electra(_)
+            | BeaconState::Fulu(_) => true,
+            BeaconState::Gloas(state) => {
+                state.latest_execution_bid.block_hash == state.latest_block_hash
+            }
         }
     }
 

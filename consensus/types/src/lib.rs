@@ -38,6 +38,7 @@ pub mod deposit_data;
 pub mod deposit_message;
 pub mod deposit_request;
 pub mod deposit_tree_snapshot;
+pub mod dumb_macros;
 pub mod enr_fork_id;
 pub mod eth1_data;
 pub mod eth_spec;
@@ -192,7 +193,7 @@ pub use crate::execution_payload_envelope::{
 pub use crate::execution_payload_header::{
     ExecutionPayloadHeader, ExecutionPayloadHeaderBellatrix, ExecutionPayloadHeaderCapella,
     ExecutionPayloadHeaderDeneb, ExecutionPayloadHeaderElectra, ExecutionPayloadHeaderFulu,
-    ExecutionPayloadHeaderGloas, ExecutionPayloadHeaderRef, ExecutionPayloadHeaderRefMut,
+    ExecutionPayloadHeaderRef, ExecutionPayloadHeaderRefMut,
 };
 pub use crate::execution_requests::{ExecutionRequests, RequestType};
 pub use crate::fork::Fork;
@@ -208,35 +209,32 @@ pub use crate::indexed_payload_attestation::IndexedPayloadAttestation;
 pub use crate::light_client_bootstrap::{
     LightClientBootstrap, LightClientBootstrapAltair, LightClientBootstrapCapella,
     LightClientBootstrapDeneb, LightClientBootstrapElectra, LightClientBootstrapFulu,
-    LightClientBootstrapGloas,
 };
 pub use crate::light_client_finality_update::{
     LightClientFinalityUpdate, LightClientFinalityUpdateAltair, LightClientFinalityUpdateCapella,
     LightClientFinalityUpdateDeneb, LightClientFinalityUpdateElectra,
-    LightClientFinalityUpdateFulu, LightClientFinalityUpdateGloas,
+    LightClientFinalityUpdateFulu,
 };
 pub use crate::light_client_header::{
     LightClientHeader, LightClientHeaderAltair, LightClientHeaderCapella, LightClientHeaderDeneb,
-    LightClientHeaderElectra, LightClientHeaderFulu, LightClientHeaderGloas,
+    LightClientHeaderElectra, LightClientHeaderFulu,
 };
 pub use crate::light_client_optimistic_update::{
     LightClientOptimisticUpdate, LightClientOptimisticUpdateAltair,
     LightClientOptimisticUpdateCapella, LightClientOptimisticUpdateDeneb,
     LightClientOptimisticUpdateElectra, LightClientOptimisticUpdateFulu,
-    LightClientOptimisticUpdateGloas,
 };
 pub use crate::light_client_update::{
     Error as LightClientUpdateError, LightClientUpdate, LightClientUpdateAltair,
     LightClientUpdateCapella, LightClientUpdateDeneb, LightClientUpdateElectra,
-    LightClientUpdateFulu, LightClientUpdateGloas, MerkleProof,
+    LightClientUpdateFulu, MerkleProof,
 };
 pub use crate::participation_flags::ParticipationFlags;
 pub use crate::payload::{
     AbstractExecPayload, BlindedPayload, BlindedPayloadBellatrix, BlindedPayloadCapella,
-    BlindedPayloadDeneb, BlindedPayloadElectra, BlindedPayloadFulu, BlindedPayloadGloas,
-    BlindedPayloadRef, BlockType, ExecPayload, FullPayload, FullPayloadBellatrix,
-    FullPayloadCapella, FullPayloadDeneb, FullPayloadElectra, FullPayloadFulu, FullPayloadGloas,
-    FullPayloadRef, OwnedExecPayload,
+    BlindedPayloadDeneb, BlindedPayloadElectra, BlindedPayloadFulu, BlindedPayloadRef, BlockType,
+    ExecPayload, FullPayload, FullPayloadBellatrix, FullPayloadCapella, FullPayloadDeneb,
+    FullPayloadElectra, FullPayloadFulu, FullPayloadRef, OwnedExecPayload,
 };
 pub use crate::payload_attestation::PayloadAttestation;
 pub use crate::payload_attestation_data::PayloadAttestationData;
