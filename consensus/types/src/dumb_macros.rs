@@ -3,6 +3,7 @@
 // - ExecutionPayloadHeader
 // - FullPayload
 // - BlindedPayload
+// TODO(EIP-7732): get rid of this whole file and panics once the engine_api is refactored for ePBS
 
 #[macro_export]
 macro_rules! map_execution_payload_into_full_payload {

@@ -127,14 +127,11 @@ pub struct BeaconBlockBody<E: EthSpec, Payload: AbstractExecPayload<E> = FullPay
     #[superstruct(only(Fulu), partial_getter(rename = "execution_payload_fulu"))]
     #[serde(flatten)]
     pub execution_payload: Payload::Fulu,
-    // execution_payload removed from Gloas, replaced with signed_execution_bid below
     #[superstruct(only(Capella, Deneb, Electra, Fulu, Gloas))]
     pub bls_to_execution_changes:
         VariableList<SignedBlsToExecutionChange, E::MaxBlsToExecutionChanges>,
-    // blob_kzg_commitments removed from Gloas, moved to `ExecutionPayloadEnvelope`
     #[superstruct(only(Deneb, Electra, Fulu))]
     pub blob_kzg_commitments: KzgCommitments<E>,
-    // execution_requests removed from Gloas, moved to `ExecutionPayloadEnvelope`
     #[superstruct(only(Electra, Fulu))]
     pub execution_requests: ExecutionRequests<E>,
     #[superstruct(only(Gloas))]

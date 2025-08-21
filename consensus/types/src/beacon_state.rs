@@ -2137,6 +2137,7 @@ impl<E: EthSpec> BeaconState<E> {
     pub fn is_parent_block_full(&self) -> bool {
         match self {
             BeaconState::Base(_) | BeaconState::Altair(_) => false,
+            // TODO(EIP-7732): check the implications of this when we get to forkchoice modifications
             BeaconState::Bellatrix(_)
             | BeaconState::Capella(_)
             | BeaconState::Deneb(_)
