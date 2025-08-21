@@ -12,6 +12,7 @@ use tree_hash_derive::TreeHash;
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[derivative(PartialEq, Hash)]
 #[context_deserialize(ForkName)]
+// https://github.com/ethereum/consensus-specs/blob/bba2c7be148d6d921d2ca5e1cc528f5daaf456d9/specs/gloas/beacon-chain.md#signedexecutionpayloadheader
 pub struct SignedExecutionBid {
     pub message: ExecutionBid,
     pub signature: Signature,
