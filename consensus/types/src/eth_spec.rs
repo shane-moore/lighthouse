@@ -3,9 +3,9 @@ use crate::*;
 use safe_arith::SafeArith;
 use serde::{Deserialize, Serialize};
 use ssz_types::typenum::{
-    U0, U1, U2, U4, U8, U10, U16, U17, U32, U64, U128, U256, U512, U625, U1024, U2048, U4096,
-    U8192, U65536, U131072, U262144, U1048576, U16777216, U33554432, U134217728, U1073741824,
-    U1099511627776, UInt, bit::B0,
+    bit::B0, UInt, U0, U1, U10, U1024, U1048576, U1073741824, U1099511627776, U128, U131072,
+    U134217728, U16, U16777216, U17, U2, U2048, U256, U262144, U32, U33554432, U4, U4096, U512,
+    U625, U64, U65536, U8, U8192,
 };
 use std::fmt::{self, Debug};
 use std::str::FromStr;
@@ -352,6 +352,11 @@ pub trait EthSpec: 'static + Default + Sync + Send + Clone + Debug + PartialEq +
     /// Returns the `PENDING_CONSOLIDATIONS_LIMIT` constant for this specification.
     fn pending_consolidations_limit() -> usize {
         Self::PendingConsolidationsLimit::to_usize()
+    }
+
+    /// Returns the `BUILDER_PENDING_PAYMENTS_LIMIT` constant for this specification.
+    fn builder_pending_payments_limit() -> usize {
+        Self::BuilderPendingPaymentsLimit::to_usize()
     }
 
     /// Returns the `BUILDER_PENDING_WITHDRAWALS_LIMIT` constant for this specification.
