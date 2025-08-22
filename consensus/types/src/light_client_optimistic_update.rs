@@ -2,9 +2,9 @@ use super::{ContextDeserialize, EthSpec, ForkName, LightClientHeader, Slot, Sync
 use crate::context_deserialize;
 use crate::test_utils::TestRandom;
 use crate::{
-    light_client_update::*, ChainSpec, LightClientHeaderAltair, LightClientHeaderCapella,
-    LightClientHeaderDeneb, LightClientHeaderElectra, LightClientHeaderFulu,
-    SignedBlindedBeaconBlock,
+    ChainSpec, LightClientHeaderAltair, LightClientHeaderCapella, LightClientHeaderDeneb,
+    LightClientHeaderElectra, LightClientHeaderFulu, SignedBlindedBeaconBlock,
+    light_client_update::*,
 };
 use derivative::Derivative;
 use serde::{Deserialize, Deserializer, Serialize};

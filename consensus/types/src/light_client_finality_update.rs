@@ -2,9 +2,9 @@ use super::{EthSpec, FixedVector, Hash256, LightClientHeader, Slot, SyncAggregat
 use crate::ChainSpec;
 use crate::context_deserialize;
 use crate::{
-    light_client_update::*, test_utils::TestRandom, ContextDeserialize, ForkName,
-    LightClientHeaderAltair, LightClientHeaderCapella, LightClientHeaderDeneb,
-    LightClientHeaderElectra, LightClientHeaderFulu, SignedBlindedBeaconBlock,
+    ContextDeserialize, ForkName, LightClientHeaderAltair, LightClientHeaderCapella,
+    LightClientHeaderDeneb, LightClientHeaderElectra, LightClientHeaderFulu,
+    SignedBlindedBeaconBlock, light_client_update::*, test_utils::TestRandom,
 };
 use derivative::Derivative;
 use serde::{Deserialize, Deserializer, Serialize};

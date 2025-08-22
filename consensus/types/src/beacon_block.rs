@@ -681,7 +681,7 @@ impl<E: EthSpec, Payload: AbstractExecPayload<E>> EmptyBlock for BeaconBlockGloa
     }
 }
 
-/// TODO(EIP-7732) Mark's branch had the following implementation but not sure if it's needed so will just add header below for reference
+// TODO(EIP-7732) Mark's branch had the following implementation but not sure if it's needed so will just add header below for reference
 // impl<E: EthSpec, Payload: AbstractExecPayload<E>> BeaconBlockEIP7732<E, Payload> {
 
 // TODO(EIP-7732) Look into whether we can remove this in the future since no blinded blocks post-gloas

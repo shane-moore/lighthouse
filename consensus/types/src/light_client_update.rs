@@ -3,9 +3,9 @@ use crate::LightClientHeader;
 use crate::context_deserialize;
 use crate::light_client_header::LightClientHeaderElectra;
 use crate::{
-    beacon_state, test_utils::TestRandom, ChainSpec, ContextDeserialize, Epoch, ForkName,
-    LightClientHeaderAltair, LightClientHeaderCapella, LightClientHeaderDeneb,
-    LightClientHeaderFulu, SignedBlindedBeaconBlock,
+    ChainSpec, ContextDeserialize, Epoch, ForkName, LightClientHeaderAltair,
+    LightClientHeaderCapella, LightClientHeaderDeneb, LightClientHeaderFulu,
+    SignedBlindedBeaconBlock, beacon_state, test_utils::TestRandom,
 };
 use derivative::Derivative;
 use safe_arith::ArithError;
