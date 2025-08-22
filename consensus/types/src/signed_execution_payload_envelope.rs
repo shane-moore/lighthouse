@@ -50,8 +50,8 @@ pub struct SignedExecutionPayloadEnvelope<E: EthSpec> {
 impl<E: EthSpec> SignedExecutionPayloadEnvelope<E> {
     pub fn message(&self) -> ExecutionPayloadEnvelopeRef<E> {
         match self {
-            Self::Gloas(ref signed) => ExecutionPayloadEnvelopeRef::Gloas(&signed.message),
-            Self::NextFork(ref signed) => ExecutionPayloadEnvelopeRef::NextFork(&signed.message),
+            Self::Gloas(signed) => ExecutionPayloadEnvelopeRef::Gloas(&signed.message),
+            Self::NextFork(signed) => ExecutionPayloadEnvelopeRef::NextFork(&signed.message),
         }
     }
 }

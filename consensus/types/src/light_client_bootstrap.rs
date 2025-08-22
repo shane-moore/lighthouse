@@ -1,9 +1,9 @@
 use crate::context_deserialize;
 use crate::{
-    light_client_update::*, test_utils::TestRandom, BeaconState, ChainSpec, ContextDeserialize,
-    EthSpec, FixedVector, ForkName, Hash256, LightClientHeader, LightClientHeaderAltair,
-    LightClientHeaderCapella, LightClientHeaderDeneb, LightClientHeaderElectra,
-    LightClientHeaderFulu, SignedBlindedBeaconBlock, Slot, SyncCommittee,
+    BeaconState, ChainSpec, ContextDeserialize, EthSpec, FixedVector, ForkName, Hash256,
+    LightClientHeader, LightClientHeaderAltair, LightClientHeaderCapella, LightClientHeaderDeneb,
+    LightClientHeaderElectra, LightClientHeaderFulu, SignedBlindedBeaconBlock, Slot, SyncCommittee,
+    light_client_update::*, test_utils::TestRandom,
 };
 use derivative::Derivative;
 use serde::{Deserialize, Deserializer, Serialize};

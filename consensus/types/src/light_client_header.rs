@@ -1,12 +1,12 @@
 use crate::ChainSpec;
 use crate::context_deserialize;
-use crate::{light_client_update::*, BeaconBlockBody};
+use crate::{BeaconBlockBody, light_client_update::*};
 use crate::{BeaconBlockHeader, ExecutionPayloadHeader};
 use crate::{ContextDeserialize, ForkName};
 use crate::{
     EthSpec, ExecutionPayloadHeaderCapella, ExecutionPayloadHeaderDeneb,
-    ExecutionPayloadHeaderElectra, ExecutionPayloadHeaderFulu,
-    FixedVector, Hash256, SignedBlindedBeaconBlock, test_utils::TestRandom,
+    ExecutionPayloadHeaderElectra, ExecutionPayloadHeaderFulu, FixedVector, Hash256,
+    SignedBlindedBeaconBlock, test_utils::TestRandom,
 };
 use derivative::Derivative;
 use serde::{Deserialize, Deserializer, Serialize};
@@ -148,7 +148,7 @@ impl<E: EthSpec> LightClientHeader<E> {
     pub fn ssz_max_var_len_for_fork(fork_name: ForkName) -> usize {
         if fork_name.gloas_enabled() {
             // TODO(EIP7732): check this
-            return 0;
+            0
         } else if fork_name.capella_enabled() {
             ExecutionPayloadHeader::<E>::ssz_max_var_len_for_fork(fork_name)
         } else {

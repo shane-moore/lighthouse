@@ -126,7 +126,7 @@ impl<E: EthSpec> ExecutionPayloadHeader<E> {
         // TODO(newfork): Add a new case here if there are new variable fields
         if fork_name.gloas_enabled() {
             // TODO(EIP7732): check this
-            return 0;
+            0
         } else if fork_name.bellatrix_enabled() {
             // Max size of variable length `extra_data` field
             E::max_extra_data_bytes() * <u8 as Encode>::ssz_fixed_len()
@@ -516,7 +516,7 @@ impl<'de, E: EthSpec> ContextDeserialize<'de, ForkName> for ExecutionPayloadHead
                 return Err(serde::de::Error::custom(format!(
                     "ExecutionPayloadHeader failed to deserialize: unsupported fork '{}'",
                     context
-                )))
+                )));
             }
         })
     }
