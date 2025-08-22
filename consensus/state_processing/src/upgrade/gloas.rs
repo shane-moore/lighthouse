@@ -87,7 +87,7 @@ pub fn upgrade_state_to_gloas<E: EthSpec>(
         execution_payload_availability: BitVector::default(), // All bits set to false initially
         builder_pending_payments: Vector::new(vec![
             BuilderPendingPayment::default();
-            E::builder_pending_withdrawals_limit()
+            E::builder_pending_payments_limit()
         ])?,
         builder_pending_withdrawals: List::default(), // Empty list initially,
         latest_block_hash: pre.latest_execution_payload_header.block_hash,
