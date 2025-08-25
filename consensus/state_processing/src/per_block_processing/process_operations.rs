@@ -1,10 +1,10 @@
 use super::*;
-use crate::VerifySignatures;
 use crate::common::{
     get_attestation_participation_flag_indices, increase_balance, initiate_validator_exit,
     slash_validator,
 };
 use crate::per_block_processing::errors::{BlockProcessingError, IntoWithIndex};
+use crate::VerifySignatures;
 use types::consts::altair::{PARTICIPATION_FLAG_WEIGHTS, PROPOSER_WEIGHT, WEIGHT_DENOMINATOR};
 use types::typenum::U33;
 
@@ -37,7 +37,9 @@ pub fn process_operations<E: EthSpec, Payload: AbstractExecPayload<E>>(
         process_bls_to_execution_changes(state, bls_to_execution_changes, verify_signatures, spec)?;
     }
 
-    if state.fork_name_unchecked().electra_enabled() {
+    // TODO(EIP-7732):In a subsequent PR, we will add process_payload_attestations for gloas, just removing the `execution_requests` related logic post-gloas for now
+    if state.fork_name_unchecked().electra_enabled() && !state.fork_name_unchecked().gloas_enabled()
+    {
         state.update_pubkey_cache()?;
         process_deposit_requests(state, &block_body.execution_requests()?.deposits, spec)?;
         process_withdrawal_requests(state, &block_body.execution_requests()?.withdrawals, spec)?;

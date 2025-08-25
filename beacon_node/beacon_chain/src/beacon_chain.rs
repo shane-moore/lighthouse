@@ -5260,7 +5260,9 @@ impl<T: BeaconChainTypes> BeaconChain<T> {
 
         // If required, start the process of loading an execution payload from the EL early. This
         // allows it to run concurrently with things like attestation packing.
-        let prepare_payload_handle = if state.fork_name_unchecked().bellatrix_enabled() {
+        let prepare_payload_handle = if state.fork_name_unchecked().bellatrix_enabled()
+            && !state.fork_name_unchecked().gloas_enabled()
+        {
             let prepare_payload_handle = get_execution_payload(
                 self.clone(),
                 &state,
@@ -5726,7 +5728,37 @@ impl<T: BeaconChainTypes> BeaconChain<T> {
                     execution_payload_value,
                 )
             }
-            BeaconState::Gloas(_) => todo!("Gloas block production"),
+            BeaconState::Gloas(_) => {
+                // TODO(EIP-7732): Adding the logic below as a stub so tests will pass. Proper fix will be to decide where to grab `SignedExecutionBid` and `PayloadAttestation` to embed in  `BeaconBlockBody`, likely use something like `OperationPool`
+                let default_execution_bid = SignedExecutionBid::empty();
+
+                (
+                    BeaconBlock::Gloas(BeaconBlockGloas {
+                        slot,
+                        proposer_index,
+                        parent_root,
+                        state_root: Hash256::zero(),
+                        body: BeaconBlockBodyGloas {
+                            randao_reveal,
+                            eth1_data,
+                            graffiti,
+                            proposer_slashings: proposer_slashings.into(),
+                            attester_slashings: attester_slashings_electra.into(),
+                            attestations: attestations_electra.into(),
+                            deposits: deposits.into(),
+                            voluntary_exits: voluntary_exits.into(),
+                            sync_aggregate: sync_aggregate
+                                .ok_or(BlockProductionError::MissingSyncAggregate)?,
+                            bls_to_execution_changes: bls_to_execution_changes.into(),
+                            signed_execution_bid: default_execution_bid,
+                            payload_attestations: VariableList::default(),
+                            _phantom: PhantomData,
+                        },
+                    }),
+                    None,
+                    Uint256::ZERO,
+                )
+            }
         };
 
         let block = SignedBeaconBlock::from_block(

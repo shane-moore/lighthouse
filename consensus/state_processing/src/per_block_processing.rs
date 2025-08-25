@@ -172,8 +172,11 @@ pub fn per_block_processing<E: EthSpec, Payload: AbstractExecPayload<E>>(
     if is_execution_enabled(state, block.body()) {
         let body = block.body();
         // TODO(EIP-7732): build out process_withdrawals variant for gloas
-        process_withdrawals::<E, Payload>(state, body.execution_payload()?, spec)?;
-        process_execution_payload::<E, Payload>(state, body, spec)?;
+        // TODO(EIP-7732): Implement process_execution_bid for Gloas
+        if !block.fork_name_unchecked().gloas_enabled() {
+            process_withdrawals::<E, Payload>(state, body.execution_payload()?, spec)?;
+            process_execution_payload::<E, Payload>(state, body, spec)?;
+        }
     }
 
     // TODO(EIP-7732): build out process_execution_bid

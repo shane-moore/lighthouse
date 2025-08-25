@@ -62,7 +62,10 @@ impl<T: BeaconChainTypes> PayloadNotifier<T> {
         state: &BeaconState<T::EthSpec>,
         notify_execution_layer: NotifyExecutionLayer,
     ) -> Result<Self, BlockError> {
-        let payload_verification_status = if is_execution_enabled(state, block.message().body()) {
+        // TODO(EIP-7732) adding the `gloas_enabled` bypass as a stub, Think about how we will handle this post-gloas since there will be no payload in the block body to verify. We'll likely need to hook this into payload processing flow when we get to that point
+        let payload_verification_status = if is_execution_enabled(state, block.message().body())
+            && !block.message().body().fork_name().gloas_enabled()
+        {
             // Perform the initial stages of payload verification.
             //
             // We will duplicate these checks again during `per_block_processing`, however these
@@ -134,8 +137,16 @@ async fn notify_new_payload<T: BeaconChainTypes>(
         .execution_layer
         .as_ref()
         .ok_or(ExecutionPayloadError::NoExecutionConnection)?;
+    let execution_block_hash = if block.fork_name_unchecked().gloas_enabled() {
+        block.body().signed_execution_bid()?.message.block_hash
+    } else {
+        block.execution_payload()?.block_hash()
+    };
 
-    let execution_block_hash = block.execution_payload()?.block_hash();
+    // TODO(EIP-7732) This conditional is a stub until we decide how to handle notify_new_payload for gloas, i.e. during payload processing. The `block.try_into()` below will fail when trying to convert the beacon block to a `NewPayloadRequest`
+    if block.fork_name_unchecked() == types::ForkName::Gloas {
+        return Ok(PayloadVerificationStatus::Verified);
+    }
     let new_payload_response = execution_layer.notify_new_payload(block.try_into()?).await;
 
     match new_payload_response {
@@ -234,7 +245,16 @@ pub async fn validate_merge_block<T: BeaconChainTypes>(
 ) -> Result<(), BlockError> {
     let spec = &chain.spec;
     let block_epoch = block.slot().epoch(T::EthSpec::slots_per_epoch());
-    let execution_payload = block.execution_payload()?;
+
+    let parent_block_hash = if block.fork_name_unchecked().gloas_enabled() {
+        block
+            .body()
+            .signed_execution_bid()?
+            .message
+            .parent_block_hash
+    } else {
+        block.execution_payload()?.parent_hash()
+    };
 
     if spec.terminal_block_hash != ExecutionBlockHash::zero() {
         if block_epoch < spec.terminal_block_hash_activation_epoch {
@@ -245,10 +265,10 @@ pub async fn validate_merge_block<T: BeaconChainTypes>(
             .into());
         }
 
-        if execution_payload.parent_hash() != spec.terminal_block_hash {
+        if parent_block_hash != spec.terminal_block_hash {
             return Err(ExecutionPayloadError::InvalidTerminalBlockHash {
                 terminal_block_hash: spec.terminal_block_hash,
-                payload_parent_hash: execution_payload.parent_hash(),
+                payload_parent_hash: parent_block_hash,
             }
             .into());
         }
@@ -262,20 +282,20 @@ pub async fn validate_merge_block<T: BeaconChainTypes>(
         .ok_or(ExecutionPayloadError::NoExecutionConnection)?;
 
     let is_valid_terminal_pow_block = execution_layer
-        .is_valid_terminal_pow_block_hash(execution_payload.parent_hash(), spec)
+        .is_valid_terminal_pow_block_hash(parent_block_hash, spec)
         .await
         .map_err(ExecutionPayloadError::from)?;
 
     match is_valid_terminal_pow_block {
         Some(true) => Ok(()),
         Some(false) => Err(ExecutionPayloadError::InvalidTerminalPoWBlock {
-            parent_hash: execution_payload.parent_hash(),
+            parent_hash: parent_block_hash,
         }
         .into()),
         None => {
             if allow_optimistic_import == AllowOptimisticImport::Yes {
                 debug!(
-                    block_hash = ?execution_payload.parent_hash(),
+                    block_hash = ?parent_block_hash,
                     msg = "the terminal block/parent was unavailable",
                     "Optimistically importing merge transition block"
                 );
