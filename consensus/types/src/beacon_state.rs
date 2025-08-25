@@ -30,6 +30,7 @@ pub use self::committee_cache::{
 pub use crate::beacon_state::balance::Balance;
 pub use crate::beacon_state::exit_cache::ExitCache;
 pub use crate::beacon_state::progressive_balances_cache::*;
+pub use crate::beacon_state::ptc_cache::PTCCache;
 pub use crate::beacon_state::slashings_cache::SlashingsCache;
 pub use eth_spec::*;
 pub use iter::BlockRootsIter;
@@ -42,6 +43,7 @@ mod balance;
 mod exit_cache;
 mod iter;
 mod progressive_balances_cache;
+pub mod ptc_cache;
 mod pubkey_cache;
 mod slashings_cache;
 mod tests;
@@ -76,6 +78,7 @@ pub enum Error {
     BalancesOutOfBounds(usize),
     RandaoMixesOutOfBounds(usize),
     CommitteeCachesOutOfBounds(usize),
+    PTCCachesOutOfBounds(usize),
     ParticipationOutOfBounds(usize),
     InactivityScoresOutOfBounds(usize),
     TooManyValidators,
@@ -114,6 +117,7 @@ pub enum Error {
         latest_block_slot: Slot,
     },
     CommitteeCacheUninitialized(Option<RelativeEpoch>),
+    PTCCacheUninitialized(Option<RelativeEpoch>),
     SyncCommitteeCacheUninitialized,
     BlsError(bls::Error),
     SszTypesError(ssz_types::Error),
@@ -625,6 +629,12 @@ where
     #[tree_hash(skip_hashing)]
     #[test_random(default)]
     #[metastruct(exclude)]
+    pub ptc_caches: [Arc<PTCCache>; CACHED_EPOCHS],
+    #[serde(skip_serializing, skip_deserializing)]
+    #[ssz(skip_serializing, skip_deserializing)]
+    #[tree_hash(skip_hashing)]
+    #[test_random(default)]
+    #[metastruct(exclude)]
     pub progressive_balances_cache: ProgressiveBalancesCache,
     #[serde(skip_serializing, skip_deserializing)]
     #[ssz(skip_serializing, skip_deserializing)]
@@ -659,6 +669,7 @@ impl<E: EthSpec> BeaconState<E> {
     /// Not a complete genesis state, see `initialize_beacon_state_from_eth1`.
     pub fn new(genesis_time: u64, eth1_data: Eth1Data, spec: &ChainSpec) -> Self {
         let default_committee_cache = Arc::new(CommitteeCache::default());
+        let default_ptc_cache = Arc::new(PTCCache::default());
         BeaconState::Base(BeaconStateBase {
             // Versioning
             genesis_time,
@@ -708,6 +719,11 @@ impl<E: EthSpec> BeaconState<E> {
                 default_committee_cache.clone(),
                 default_committee_cache.clone(),
                 default_committee_cache,
+            ],
+            ptc_caches: [
+                default_ptc_cache.clone(),
+                default_ptc_cache.clone(),
+                default_ptc_cache,
             ],
             pubkey_cache: PubkeyCache::default(),
             exit_cache: ExitCache::default(),
@@ -2043,6 +2059,7 @@ impl<E: EthSpec> BeaconState<E> {
         self.update_pubkey_cache()?;
         self.build_exit_cache(spec)?;
         self.build_slashings_cache()?;
+        self.build_all_ptc_caches(spec)?;
 
         Ok(())
     }
@@ -2053,6 +2070,14 @@ impl<E: EthSpec> BeaconState<E> {
         self.build_committee_cache(RelativeEpoch::Previous, spec)?;
         self.build_committee_cache(RelativeEpoch::Current, spec)?;
         self.build_committee_cache(RelativeEpoch::Next, spec)?;
+        Ok(())
+    }
+
+    /// Build all PTC caches, if they need to be built.
+    pub fn build_all_ptc_caches(&mut self, spec: &ChainSpec) -> Result<(), Error> {
+        self.build_ptc_cache(RelativeEpoch::Previous, spec)?;
+        self.build_ptc_cache(RelativeEpoch::Current, spec)?;
+        self.build_ptc_cache(RelativeEpoch::Next, spec)?;
         Ok(())
     }
 
@@ -2086,6 +2111,9 @@ impl<E: EthSpec> BeaconState<E> {
         self.drop_committee_cache(RelativeEpoch::Previous)?;
         self.drop_committee_cache(RelativeEpoch::Current)?;
         self.drop_committee_cache(RelativeEpoch::Next)?;
+        self.drop_ptc_cache(RelativeEpoch::Previous)?;
+        self.drop_ptc_cache(RelativeEpoch::Current)?;
+        self.drop_ptc_cache(RelativeEpoch::Next)?;
         self.drop_pubkey_cache();
         self.drop_progressive_balances_cache();
         *self.exit_cache_mut() = ExitCache::default();
@@ -2161,6 +2189,11 @@ impl<E: EthSpec> BeaconState<E> {
 
         let next = Self::committee_cache_index(RelativeEpoch::Next);
         *self.committee_cache_at_index_mut(next)? = Arc::new(CommitteeCache::default());
+
+        // Also advance PTC caches
+        // TODO(EIP-7732): look more into this and if makes sense
+        self.advance_ptc_caches()?;
+
         Ok(())
     }
 
@@ -2220,6 +2253,116 @@ impl<E: EthSpec> BeaconState<E> {
             Arc::new(CommitteeCache::default());
         Ok(())
     }
+
+    // === PTC Cache Methods ===
+
+    /// Returns `true` if the PTC cache for `relative_epoch` is built and ready to use.
+    pub fn ptc_cache_is_initialized(&self, relative_epoch: RelativeEpoch) -> bool {
+        let i = Self::ptc_cache_index(relative_epoch);
+
+        self.ptc_cache_at_index(i).is_ok_and(|cache| {
+            cache.is_initialized_at(relative_epoch.into_epoch(self.current_epoch()))
+        })
+    }
+
+    /// Build a PTC cache, unless it has already been built.
+    pub fn build_ptc_cache(
+        &mut self,
+        relative_epoch: RelativeEpoch,
+        spec: &ChainSpec,
+    ) -> Result<(), Error> {
+        let i = Self::ptc_cache_index(relative_epoch);
+        let is_initialized = self
+            .ptc_cache_at_index(i)?
+            .is_initialized_at(relative_epoch.into_epoch(self.current_epoch()));
+
+        if !is_initialized {
+            self.force_build_ptc_cache(relative_epoch, spec)?;
+        }
+
+        Ok(())
+    }
+
+    /// Always builds the requested PTC cache, even if it is already initialized.
+    pub fn force_build_ptc_cache(
+        &mut self,
+        relative_epoch: RelativeEpoch,
+        spec: &ChainSpec,
+    ) -> Result<(), Error> {
+        let epoch = relative_epoch.into_epoch(self.current_epoch());
+        let i = Self::ptc_cache_index(relative_epoch);
+
+        *self.ptc_cache_at_index_mut(i)? = self.initialize_ptc_cache(epoch, spec)?;
+        Ok(())
+    }
+
+    /// Initializes a new PTC cache for the given `epoch`, regardless of whether one already
+    /// exists. Returns the PTC cache without attaching it to `self`.
+    ///
+    /// To build a cache and store it on `self`, use `Self::build_ptc_cache`.
+    pub fn initialize_ptc_cache(
+        &self,
+        epoch: Epoch,
+        spec: &ChainSpec,
+    ) -> Result<Arc<PTCCache>, Error> {
+        let relative_epoch = RelativeEpoch::from_epoch(self.current_epoch(), epoch)?;
+        Ok(Arc::new(PTCCache::initialized(self, relative_epoch, spec)?))
+    }
+
+    /// Advances the PTC cache for this state into the next epoch.
+    ///
+    /// This should be used if the `slot` of this state is advanced beyond an epoch boundary.
+    pub fn advance_ptc_caches(&mut self) -> Result<(), Error> {
+        self.ptc_caches_mut().rotate_left(1);
+
+        let next = Self::ptc_cache_index(RelativeEpoch::Next);
+        *self.ptc_cache_at_index_mut(next)? = Arc::new(PTCCache::default());
+        Ok(())
+    }
+
+    pub(crate) fn ptc_cache_index(relative_epoch: RelativeEpoch) -> usize {
+        match relative_epoch {
+            RelativeEpoch::Previous => 0,
+            RelativeEpoch::Current => 1,
+            RelativeEpoch::Next => 2,
+        }
+    }
+
+    /// Get the PTC cache at a given index.
+    fn ptc_cache_at_index(&self, index: usize) -> Result<&Arc<PTCCache>, Error> {
+        self.ptc_caches()
+            .get(index)
+            .ok_or(Error::PTCCachesOutOfBounds(index))
+    }
+
+    /// Get a mutable reference to the PTC cache at a given index.
+    fn ptc_cache_at_index_mut(&mut self, index: usize) -> Result<&mut Arc<PTCCache>, Error> {
+        self.ptc_caches_mut()
+            .get_mut(index)
+            .ok_or(Error::PTCCachesOutOfBounds(index))
+    }
+
+    /// Returns the cache for some `RelativeEpoch`. Returns an error if the cache has not been
+    /// initialized.
+    pub fn ptc_cache(&self, relative_epoch: RelativeEpoch) -> Result<&Arc<PTCCache>, Error> {
+        let i = Self::ptc_cache_index(relative_epoch);
+        let cache = self.ptc_cache_at_index(i)?;
+
+        if cache.is_initialized_at(relative_epoch.into_epoch(self.current_epoch())) {
+            Ok(cache)
+        } else {
+            Err(Error::PTCCacheUninitialized(Some(relative_epoch)))
+        }
+    }
+
+    /// Drops the PTC cache, leaving it in an uninitialized state.
+    pub fn drop_ptc_cache(&mut self, relative_epoch: RelativeEpoch) -> Result<(), Error> {
+        *self.ptc_cache_at_index_mut(Self::ptc_cache_index(relative_epoch))? =
+            Arc::new(PTCCache::default());
+        Ok(())
+    }
+
+    // === End PTC Cache Methods ===
 
     /// Updates the pubkey cache, if required.
     ///
@@ -2688,27 +2831,14 @@ impl<E: EthSpec> BeaconState<E> {
     }
 
     /// Get the PTC
-    /// Requires the committee cache to be initialized.
-    /// TODO(EIP-7732): definitely gonna have to cache this..
-    pub fn get_ptc(&self, slot: Slot, spec: &ChainSpec) -> Result<PTC<E>, Error> {
-        let committee_cache = self.committee_cache_at_slot(slot)?;
-        let committees = committee_cache.get_beacon_committees_at_slot(slot)?;
+    /// Requires the PTC cache to be initialized.
+    /// Use `build_ptc_cache()` to initialize the cache before calling this method.
+    pub fn get_ptc(&self, slot: Slot, _spec: &ChainSpec) -> Result<PTC<E>, Error> {
+        let epoch = slot.epoch(E::slots_per_epoch());
+        let relative_epoch = RelativeEpoch::from_epoch(self.current_epoch(), epoch)?;
+        let cache = self.ptc_cache(relative_epoch)?;
 
-        let seed = self.get_ptc_attester_seed(slot, spec)?;
-
-        let committee_indices: Vec<usize> = committees
-            .iter()
-            .flat_map(|committee| committee.committee.iter().copied())
-            .collect();
-        let selected_indices = self.compute_balance_weighted_selection(
-            &committee_indices,
-            &seed,
-            E::ptc_size(),
-            false,
-            spec,
-        )?;
-
-        Ok(PTC(FixedVector::from(selected_indices)))
+        cache.get_ptc::<E>(slot)
     }
 
     /// Compute the seed to use for the ptc attester selection at the given `slot`.

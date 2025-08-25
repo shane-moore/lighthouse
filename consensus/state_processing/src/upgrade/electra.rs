@@ -164,6 +164,7 @@ pub fn upgrade_state_to_electra<E: EthSpec>(
         total_active_balance: pre.total_active_balance,
         progressive_balances_cache: mem::take(&mut pre.progressive_balances_cache),
         committee_caches: mem::take(&mut pre.committee_caches),
+        ptc_caches: mem::take(&mut pre.ptc_caches),
         pubkey_cache: mem::take(&mut pre.pubkey_cache),
         exit_cache: mem::take(&mut pre.exit_cache),
         slashings_cache: mem::take(&mut pre.slashings_cache),

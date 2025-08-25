@@ -329,6 +329,7 @@ macro_rules! impl_try_into_beacon_state {
             total_active_balance: <_>::default(),
             progressive_balances_cache: <_>::default(),
             committee_caches: <_>::default(),
+            ptc_caches: <_>::default(),
             pubkey_cache: <_>::default(),
             exit_cache: <_>::default(),
             slashings_cache: <_>::default(),
