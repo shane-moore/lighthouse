@@ -34,6 +34,11 @@ PROFILE ?= release
 # they run for different forks.
 FORKS=phase0 altair bellatrix capella deneb electra fulu gloas
 
+# List of all hard forks up to gloas. This list is used to set env variables for several tests so that
+# they run for different forks.
+# TODO(EIP-7732) Remove this once we extend network tests to support gloas
+FORKS_BEFORE_GLOAS=phase0 altair bellatrix capella deneb electra fulu
+
 # List of all recent hard forks. This list is used to set env variables for http_api tests
 RECENT_FORKS=electra fulu
 
@@ -209,7 +214,8 @@ test-op-pool-%:
 		-p operation_pool
 
 # Run the tests in the `network` crate for all known forks.
-test-network: $(patsubst %,test-network-%,$(FORKS))
+# TODO(EIP-7732) Extend to support gloas
+test-network: $(patsubst %,test-network-%,$(FORKS_BEFORE_GLOAS))
 
 test-network-%:
 	env FORK_NAME=$* cargo nextest run --release \
