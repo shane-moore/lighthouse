@@ -137,6 +137,7 @@ fn get_states_descendant_of_block(
         .collect()
 }
 
+// TODO(EIP-7732) Extend to support gloas
 #[tokio::test]
 async fn light_client_bootstrap_test() {
     let spec = test_spec::<E>();
@@ -184,7 +185,6 @@ async fn light_client_bootstrap_test() {
         LightClientBootstrap::Deneb(lc_bootstrap) => lc_bootstrap.header.beacon.slot,
         LightClientBootstrap::Electra(lc_bootstrap) => lc_bootstrap.header.beacon.slot,
         LightClientBootstrap::Fulu(lc_bootstrap) => lc_bootstrap.header.beacon.slot,
-        LightClientBootstrap::Gloas(lc_bootstrap) => lc_bootstrap.header.beacon.slot,
     };
 
     assert_eq!(

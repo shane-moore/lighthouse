@@ -354,6 +354,11 @@ pub trait EthSpec: 'static + Default + Sync + Send + Clone + Debug + PartialEq +
         Self::PendingConsolidationsLimit::to_usize()
     }
 
+    /// Returns the `BUILDER_PENDING_PAYMENTS_LIMIT` constant for this specification.
+    fn builder_pending_payments_limit() -> usize {
+        Self::BuilderPendingPaymentsLimit::to_usize()
+    }
+
     /// Returns the `BUILDER_PENDING_WITHDRAWALS_LIMIT` constant for this specification.
     fn builder_pending_withdrawals_limit() -> usize {
         Self::BuilderPendingWithdrawalsLimit::to_usize()
