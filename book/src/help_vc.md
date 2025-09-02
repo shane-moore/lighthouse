@@ -272,6 +272,11 @@ Flags:
           by builders, regardless of payload value.
       --stdin-inputs
           If present, read all user inputs from stdin instead of tty.
+      --produce-block-v4
+          Enable block production via the block v4 endpoint for this validator
+          client. This should only be enabled when paired with a beacon node
+          that has this endpoint implemented. This flag will be enabled by
+          default in future.
       --unencrypted-http-transport
           This is a safety flag to ensure that the user is aware that the http
           transport is unencrypted and using a custom HTTP address is unsafe.

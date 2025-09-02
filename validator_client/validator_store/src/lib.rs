@@ -86,6 +86,9 @@ pub trait ValidatorStore: Send + Sync {
     /// - Else return `None` to indicate no preference between builder and local payloads.
     fn determine_builder_boost_factor(&self, validator_pubkey: &PublicKeyBytes) -> Option<u64>;
 
+    /// Returns whether block production via the block v4 endpoint is enabled.
+    fn produce_block_v4(&self) -> bool;
+
     fn randao_reveal(
         &self,
         validator_pubkey: PublicKeyBytes,

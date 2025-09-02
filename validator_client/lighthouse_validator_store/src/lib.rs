@@ -46,6 +46,8 @@ pub struct Config {
     pub prefer_builder_proposals: bool,
     /// Specifies the boost factor, a percentage multiplier to apply to the builder's payload value.
     pub builder_boost_factor: Option<u64>,
+    /// If true, enable produce_block_v4. This will be default after gloas
+    pub produce_block_v4: bool,
 }
 
 /// Number of epochs of slashing protection history to keep.
@@ -70,6 +72,7 @@ pub struct LighthouseValidatorStore<T, E> {
     gas_limit: Option<u64>,
     builder_proposals: bool,
     enable_web3signer_slashing_protection: bool,
+    produce_block_v4: bool,
     prefer_builder_proposals: bool,
     builder_boost_factor: Option<u64>,
     task_executor: TaskExecutor,
@@ -102,6 +105,7 @@ impl<T: SlotClock + 'static, E: EthSpec> LighthouseValidatorStore<T, E> {
             gas_limit: config.gas_limit,
             builder_proposals: config.builder_proposals,
             enable_web3signer_slashing_protection: config.enable_web3signer_slashing_protection,
+            produce_block_v4: config.produce_block_v4,
             prefer_builder_proposals: config.prefer_builder_proposals,
             builder_boost_factor: config.builder_boost_factor,
             task_executor,
@@ -238,6 +242,10 @@ impl<T: SlotClock + 'static, E: EthSpec> LighthouseValidatorStore<T, E> {
 
     fn fork(&self, epoch: Epoch) -> Fork {
         self.spec.fork_at_epoch(epoch)
+    }
+
+    pub fn produce_block_v4(&self) -> bool {
+        self.produce_block_v4
     }
 
     /// Returns a `SigningMethod` for `validator_pubkey` *only if* that validator is considered safe
@@ -695,6 +703,10 @@ impl<T: SlotClock + 'static, E: EthSpec> ValidatorStore for LighthouseValidatorS
                 // lead to loss of information.
                 if factor == 100 { None } else { Some(factor) }
             })
+    }
+
+    fn produce_block_v4(&self) -> bool {
+        self.produce_block_v4
     }
 
     async fn randao_reveal(

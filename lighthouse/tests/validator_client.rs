@@ -570,6 +570,20 @@ fn builder_registration_timestamp_override_flag() {
         });
 }
 #[test]
+fn produce_block_v4_flag() {
+    CommandLineTest::new()
+        .flag("produce-block-v4", None)
+        .run()
+        .with_config(|config| assert!(config.validator_store.produce_block_v4));
+}
+
+#[test]
+fn no_produce_block_v4_flag() {
+    CommandLineTest::new()
+        .run()
+        .with_config(|config| assert!(!config.validator_store.produce_block_v4));
+}
+#[test]
 fn monitoring_endpoint() {
     CommandLineTest::new()
         .flag("monitoring-endpoint", Some("http://example:8000"))

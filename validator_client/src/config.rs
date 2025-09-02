@@ -389,6 +389,7 @@ impl Config {
             };
 
         config.disable_attesting = validator_client_config.disable_attesting;
+        config.validator_store.produce_block_v4 = validator_client_config.produce_block_v4;
 
         Ok(config)
     }
