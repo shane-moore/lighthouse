@@ -10,6 +10,7 @@ pub const BEACON_BLOCK_HTTP_GET: &str = "beacon_block_http_get";
 pub const BEACON_BLOCK_HTTP_POST: &str = "beacon_block_http_post";
 pub const BLINDED_BEACON_BLOCK_HTTP_POST: &str = "blinded_beacon_block_http_post";
 pub const EXECUTION_PAYLOAD_ENVELOPE_HTTP_GET: &str = "execution_payload_envelope_http_get";
+pub const EXECUTION_PAYLOAD_ENVELOPE_HTTP_POST: &str = "execution_payload_envelope_http_post";
 pub const EXECUTION_PAYLOAD_ENVELOPE_SIGN: &str = "execution_payload_envelope_sign";
 pub const EXECUTION_PAYLOAD_ENVELOPE: &str = "execution_payload_envelope";
 pub const ATTESTATIONS: &str = "attestations";

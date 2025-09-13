@@ -766,6 +766,45 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> BlockService<S, T> {
         Ok::<_ , BlockError>(())
     }
 
+    async fn publish_signed_envelope_contents(
+        &self,
+        signed_envelope: &types::SignedExecutionPayloadEnvelope<S::E>,
+        slot: Slot,
+    ) -> Result<(), BlockError> {
+        let _post_timer = validator_metrics::start_timer_vec(
+            &validator_metrics::BLOCK_SERVICE_TIMES,
+            &[validator_metrics::EXECUTION_PAYLOAD_ENVELOPE_HTTP_POST],
+        );
+
+        // Create proposer fallback for envelope publishing
+        let proposer_fallback = ProposerFallback {
+            beacon_nodes: self.beacon_nodes.clone(),
+            proposer_nodes: self.proposer_nodes.clone(),
+        };
+
+        // Publish envelope with first available beacon node.
+        // Try the proposer nodes first, since we've likely gone to efforts to
+        // protect them from DoS attacks and they're most likely to successfully
+        // publish an envelope.
+        let fork_name = self.chain_spec.fork_name_at_slot::<S::E>(slot);
+
+        proposer_fallback
+            .request_proposers_first(|beacon_node| async move {
+                beacon_node
+                    .post_execution_payload_envelope_ssz(signed_envelope, fork_name)
+                    .await
+                    .map_err(|e| {
+                        BlockError::Recoverable(format!(
+                            "Error from beacon node when publishing execution payload envelope: {:?}",
+                            e
+                        ))
+                    })
+            })
+            .await?;
+
+        Ok(())
+    }
+
     // TODO(EIP-7732): Remove this sometime after gloas is live
     async fn get_validator_block(
         beacon_node: &BeaconNodeHttpClient,
@@ -904,7 +943,6 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> BlockService<S, T> {
             "Signing execution payload envelope using ValidatorStore"
         );
 
-        // Use the ValidatorStore to sign the execution payload envelope
         let signed_envelope = self
             .validator_store
             .sign_execution_payload_envelope(validator_pubkey, envelope, slot)
@@ -1012,13 +1050,11 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> BlockService<S, T> {
 
         info!(slot = slot.as_u64(), pub_key = %validator_pubkey, "Submitting payload envelope");
 
-        // Step 1: Obtain ExecutionPayloadEnvelope from the beacon API
         let envelope = self
             .get_execution_payload_envelope(slot, &validator_pubkey, source_beacon_node)
             .await?;
 
-        // Step 2: Sign the execution payload envelope
-        let _signed_envelope = self
+        let signed_envelope = self
             .sign_execution_payload_envelope(&envelope, validator_pubkey, slot)
             .await?;
 
@@ -1028,7 +1064,13 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> BlockService<S, T> {
             "Successfully signed execution payload envelope"
         );
 
-        // TODO: Step 3: Broadcast the SignedExecutionPayloadEnvelope
+        self.publish_signed_envelope_contents(&signed_envelope, slot).await?;
+
+        info!(
+            ?slot,
+            pub_key = %validator_pubkey,
+            "Successfully published execution payload envelope"
+        );
 
         Ok(())
     }

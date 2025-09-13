@@ -67,6 +67,8 @@ const HTTP_GET_BEACON_BLOCK_SSZ_TIMEOUT_QUOTIENT: u32 = 4;
 const HTTP_GET_DEBUG_BEACON_STATE_QUOTIENT: u32 = 4;
 const HTTP_GET_DEPOSIT_SNAPSHOT_QUOTIENT: u32 = 4;
 const HTTP_GET_VALIDATOR_BLOCK_TIMEOUT_QUOTIENT: u32 = 4;
+// TODO(EIP-7732): determine what the envelope timeout should be
+const HTTP_GET_EXECUTION_PAYLOAD_ENVELOPE_TIMEOUT_QUOTIENT: u32 = 4;
 const HTTP_DEFAULT_TIMEOUT_QUOTIENT: u32 = 4;
 
 #[derive(Debug)]
@@ -162,6 +164,7 @@ pub struct Timeouts {
     pub get_debug_beacon_states: Duration,
     pub get_deposit_snapshot: Duration,
     pub get_validator_block: Duration,
+    pub get_execution_payload_envelope: Duration,
     pub default: Duration,
 }
 
@@ -180,6 +183,7 @@ impl Timeouts {
             get_debug_beacon_states: timeout,
             get_deposit_snapshot: timeout,
             get_validator_block: timeout,
+            get_execution_payload_envelope: timeout,
             default: timeout,
         }
     }
@@ -200,6 +204,8 @@ impl Timeouts {
             get_debug_beacon_states: base_timeout / HTTP_GET_DEBUG_BEACON_STATE_QUOTIENT,
             get_deposit_snapshot: base_timeout / HTTP_GET_DEPOSIT_SNAPSHOT_QUOTIENT,
             get_validator_block: base_timeout / HTTP_GET_VALIDATOR_BLOCK_TIMEOUT_QUOTIENT,
+            get_execution_payload_envelope: base_timeout
+                / HTTP_GET_EXECUTION_PAYLOAD_ENVELOPE_TIMEOUT_QUOTIENT,
             default: base_timeout / HTTP_DEFAULT_TIMEOUT_QUOTIENT,
         }
     }
@@ -2565,7 +2571,7 @@ impl BeaconNodeHttpClient {
             .get_execution_payload_envelope_path(slot, builder_index)
             .await?;
 
-        self.get_with_timeout(path, self.timeouts.get_validator_block)
+        self.get_with_timeout(path, self.timeouts.get_execution_payload_envelope)
             .await
     }
 
@@ -2583,7 +2589,7 @@ impl BeaconNodeHttpClient {
             .get_response_with_response_headers(
                 path,
                 Accept::Ssz,
-                self.timeouts.get_validator_block,
+                self.timeouts.get_execution_payload_envelope,
                 |response, headers| async move {
                     let metadata = ExecutionPayloadEnvelopeMetadata::try_from(&headers)
                         .map_err(Error::InvalidHeaders)?;
@@ -2620,6 +2626,54 @@ impl BeaconNodeHttpClient {
             .push(&builder_index.to_string());
 
         Ok(path)
+    }
+
+    /// `POST v1/beacon/execution_payload_envelope`
+    pub async fn post_execution_payload_envelope<E: EthSpec>(
+        &self,
+        envelope: &types::SignedExecutionPayloadEnvelope<E>,
+        fork_name: ForkName,
+    ) -> Result<(), Error> {
+        let mut path = self.eth_path(V1)?;
+
+        path.path_segments_mut()
+            .map_err(|()| Error::InvalidUrl(self.server.clone()))?
+            .push("beacon")
+            .push("execution_payload_envelope");
+
+        self.post_generic_with_consensus_version(
+            path,
+            envelope,
+            Some(self.timeouts.proposal),
+            fork_name,
+        )
+        .await?;
+
+        Ok(())
+    }
+
+    /// `POST v1/beacon/execution_payload_envelope` in SSZ format
+    pub async fn post_execution_payload_envelope_ssz<E: EthSpec>(
+        &self,
+        envelope: &types::SignedExecutionPayloadEnvelope<E>,
+        fork_name: ForkName,
+    ) -> Result<(), Error> {
+        let mut path = self.eth_path(V1)?;
+
+        path.path_segments_mut()
+            .map_err(|()| Error::InvalidUrl(self.server.clone()))?
+            .push("beacon")
+            .push("execution_payload_envelope");
+
+        self.post_generic_with_consensus_version_and_ssz_body(
+            path,
+            envelope.as_ssz_bytes(),
+            Some(self.timeouts.proposal),
+            fork_name,
+        )
+        .await?;
+
+        Ok(())
     }
 
     /// returns `GET v4/validator/blocks/{slot}` URL path
