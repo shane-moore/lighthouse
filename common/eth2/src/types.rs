@@ -2,11 +2,11 @@
 //! required for the HTTP API.
 
 use crate::{
-    CONSENSUS_BLOCK_VALUE_HEADER, CONSENSUS_VERSION_HEADER, EXECUTION_PAYLOAD_BLINDED_HEADER,
-    EXECUTION_PAYLOAD_VALUE_HEADER, Error as ServerError,
+    Error as ServerError, CONSENSUS_BLOCK_VALUE_HEADER, CONSENSUS_VERSION_HEADER,
+    EXECUTION_PAYLOAD_BLINDED_HEADER, EXECUTION_PAYLOAD_VALUE_HEADER,
 };
 use enr::{CombinedKey, Enr};
-use mediatype::{MediaType, MediaTypeList, names};
+use mediatype::{names, MediaType, MediaTypeList};
 use multiaddr::Multiaddr;
 use reqwest::header::HeaderMap;
 use serde::{Deserialize, Deserializer, Serialize};
@@ -1582,7 +1582,7 @@ pub struct BroadcastValidationQuery {
 
 pub mod serde_status_code {
     use crate::StatusCode;
-    use serde::{Deserialize, Serialize, de::Error};
+    use serde::{de::Error, Deserialize, Serialize};
 
     pub fn serialize<S>(status_code: &StatusCode, ser: S) -> Result<S::Ok, S::Error>
     where
@@ -1711,6 +1711,7 @@ fn dummy_consensus_version() -> ForkName {
     ForkName::Base
 }
 
+// TODO(EIP-7732): update this pending reviews of beacon api PR https://github.com/ethereum/beacon-APIs/pull/552
 /// Metadata about a `ProduceBlockV3Response` which is returned in the body & headers.
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ProduceBlockV3Metadata {
@@ -1724,6 +1725,41 @@ pub struct ProduceBlockV3Metadata {
     pub execution_payload_blinded: bool,
     #[serde(with = "serde_utils::u256_dec")]
     pub execution_payload_value: Uint256,
+    #[serde(with = "serde_utils::u256_dec")]
+    pub consensus_block_value: Uint256,
+}
+
+/// Metadata about a `ExecutionPayloadEnvelope` response which is returned in the headers.
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ExecutionPayloadEnvelopeMetadata {
+    // The consensus version is serialized & deserialized by `ForkVersionedResponse`.
+    #[serde(
+        skip_serializing,
+        skip_deserializing,
+        default = "dummy_consensus_version"
+    )]
+    pub consensus_version: ForkName,
+}
+
+/// Response from the `/eth/v4/validator/blocks/{slot}` endpoint.
+/// 
+/// V4 is specific to post-Gloas forks and always returns a BeaconBlock directly.
+/// No blinded/unblinded concept exists in Gloas.
+pub type ProduceBlockV4Response<E> = BeaconBlock<E>;
+
+pub type JsonProduceBlockV4Response<E> =
+    ForkVersionedResponse<ProduceBlockV4Response<E>, ProduceBlockV4Metadata>;
+
+/// Metadata about a `ProduceBlockV4Response` which is returned in the body & headers.
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ProduceBlockV4Metadata {
+    // The consensus version is serialized & deserialized by `ForkVersionedResponse`.
+    #[serde(
+        skip_serializing,
+        skip_deserializing,
+        default = "dummy_consensus_version"
+    )]
+    pub consensus_version: ForkName,
     #[serde(with = "serde_utils::u256_dec")]
     pub consensus_block_value: Uint256,
 }
@@ -1879,6 +1915,40 @@ impl TryFrom<&HeaderMap> for ProduceBlockV3Metadata {
             consensus_version,
             execution_payload_blinded,
             execution_payload_value,
+            consensus_block_value,
+        })
+    }
+}
+
+impl TryFrom<&HeaderMap> for ExecutionPayloadEnvelopeMetadata {
+    type Error = String;
+
+    fn try_from(headers: &HeaderMap) -> Result<Self, Self::Error> {
+        let consensus_version = parse_required_header(headers, CONSENSUS_VERSION_HEADER, |s| {
+            s.parse::<ForkName>()
+                .map_err(|e| format!("invalid {CONSENSUS_VERSION_HEADER}: {e:?}"))
+        })?;
+
+        Ok(ExecutionPayloadEnvelopeMetadata { consensus_version })
+    }
+}
+
+impl TryFrom<&HeaderMap> for ProduceBlockV4Metadata {
+    type Error = String;
+
+    fn try_from(headers: &HeaderMap) -> Result<Self, Self::Error> {
+        let consensus_version = parse_required_header(headers, CONSENSUS_VERSION_HEADER, |s| {
+            s.parse::<ForkName>()
+                .map_err(|e| format!("invalid {CONSENSUS_VERSION_HEADER}: {e:?}"))
+        })?;
+        let consensus_block_value =
+            parse_required_header(headers, CONSENSUS_BLOCK_VALUE_HEADER, |s| {
+                Uint256::from_str_radix(s, 10)
+                    .map_err(|e| format!("invalid {CONSENSUS_BLOCK_VALUE_HEADER}: {e:?}"))
+            })?;
+
+        Ok(ProduceBlockV4Metadata {
+            consensus_version,
             consensus_block_value,
         })
     }
