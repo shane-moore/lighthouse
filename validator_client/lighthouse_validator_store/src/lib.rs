@@ -27,8 +27,8 @@ use types::{
     signed_execution_payload_envelope,
 };
 use validator_store::{
-    DoppelgangerStatus, Error as ValidatorStoreError, ProposalData, SignedBlock,
-    UnsignedBlock, ValidatorStore,
+    DoppelgangerStatus, Error as ValidatorStoreError, ProposalData, SignedBlock, UnsignedBlock,
+    ValidatorStore,
 };
 
 pub type Error = ValidatorStoreError<SigningError>;

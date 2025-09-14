@@ -12,10 +12,10 @@ use std::time::Duration;
 use task_executor::TaskExecutor;
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, trace, warn};
-use types::{BeaconBlock, BlockType, ChainSpec, EthSpec, Graffiti, PublicKeyBytes, SignedBeaconBlock, Slot};
-use validator_store::{
-    Error as ValidatorStoreError, SignedBlock, UnsignedBlock, ValidatorStore,
+use types::{
+    BeaconBlock, BlockType, ChainSpec, EthSpec, Graffiti, PublicKeyBytes, SignedBeaconBlock, Slot,
 };
+use validator_store::{Error as ValidatorStoreError, SignedBlock, UnsignedBlock, ValidatorStore};
 
 #[derive(Debug)]
 pub enum BlockError {
@@ -327,7 +327,7 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> BlockService<S, T> {
             )
         }
 
-                let current_epoch = slot.epoch(S::E::slots_per_epoch());
+        let current_epoch = slot.epoch(S::E::slots_per_epoch());
 
         for validator_pubkey in proposers {
             let builder_boost_factor = self
@@ -379,7 +379,7 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> BlockService<S, T> {
             .validator_store
             .sign_block(*validator_pubkey, unsigned_block, slot)
             .await;
-// todo(eip-7732): see if need to add similar checks for exec envelope signing
+
         let signed_block = match res {
             Ok(block) => block,
             Err(ValidatorStoreError::UnknownPubkey(pubkey)) => {
@@ -458,8 +458,8 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> BlockService<S, T> {
                 warn!(
                     info = "a validator may have recently been removed from this VC",
                     ?pubkey,
-                    ?slot
-,                    "Missing pubkey for block"
+                    ?slot,
+                    "Missing pubkey for block"
                 );
                 return Ok(());
             }
@@ -691,7 +691,7 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> BlockService<S, T> {
             )
             .await?;
 
-          drop(timer);
+        drop(timer);
 
         // Check if this validator is also the builder for this block. If so, publish envelope
         if let (Ok(bid), Some(validator_idx)) = (
@@ -763,7 +763,7 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> BlockService<S, T> {
             .post_beacon_blocks_v2_ssz(&publish_request, None)
             .await
             .or_else(|e| handle_block_post_error(e, signed_block.message().slot()))?;
-        Ok::<_ , BlockError>(())
+        Ok::<_, BlockError>(())
     }
 
     async fn publish_signed_envelope_contents(
@@ -935,7 +935,8 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> BlockService<S, T> {
         validator_pubkey: PublicKeyBytes,
         slot: Slot,
     ) -> Result<types::SignedExecutionPayloadEnvelope<S::E>, BlockError> {
-        let envelope_signing_timer = validator_metrics::start_timer(&validator_metrics::ENVELOPE_SIGNING_TIMES);
+        let envelope_signing_timer =
+            validator_metrics::start_timer(&validator_metrics::ENVELOPE_SIGNING_TIMES);
 
         info!(
             slot = slot.as_u64(),
@@ -954,9 +955,9 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> BlockService<S, T> {
                 ))
             })?;
 
-        let envelope_signing_time_ms = Duration::from_secs_f64(
-            envelope_signing_timer.map_or(0.0, |t| t.stop_and_record())
-        ).as_millis();
+        let envelope_signing_time_ms =
+            Duration::from_secs_f64(envelope_signing_timer.map_or(0.0, |t| t.stop_and_record()))
+                .as_millis();
 
         info!(
             slot = slot.as_u64(),
@@ -1064,7 +1065,8 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> BlockService<S, T> {
             "Successfully signed execution payload envelope"
         );
 
-        self.publish_signed_envelope_contents(&signed_envelope, slot).await?;
+        self.publish_signed_envelope_contents(&signed_envelope, slot)
+            .await?;
 
         info!(
             ?slot,
@@ -1110,7 +1112,7 @@ impl<E: EthSpec> From<&Arc<SignedBeaconBlock<E>>> for BlockMetadata {
             block_type: BlockType::Full,
             slot: block.message().slot(),
             num_deposits: block.message().body().deposits().len(),
-             num_attestations: block.message().body().attestations_len(),
+            num_attestations: block.message().body().attestations_len(),
         }
     }
 }
