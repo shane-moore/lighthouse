@@ -69,6 +69,7 @@ const HTTP_GET_DEPOSIT_SNAPSHOT_QUOTIENT: u32 = 4;
 const HTTP_GET_VALIDATOR_BLOCK_TIMEOUT_QUOTIENT: u32 = 4;
 // TODO(EIP-7732): determine what the envelope timeout should be
 const HTTP_GET_EXECUTION_PAYLOAD_ENVELOPE_TIMEOUT_QUOTIENT: u32 = 4;
+const HTTP_POST_EXECUTION_PAYLOAD_ENVELOPE_TIMEOUT_QUOTIENT: u32 = 4;
 const HTTP_DEFAULT_TIMEOUT_QUOTIENT: u32 = 4;
 
 #[derive(Debug)]
@@ -165,6 +166,7 @@ pub struct Timeouts {
     pub get_deposit_snapshot: Duration,
     pub get_validator_block: Duration,
     pub get_execution_payload_envelope: Duration,
+    pub post_execution_payload_envelope: Duration,
     pub default: Duration,
 }
 
@@ -184,6 +186,7 @@ impl Timeouts {
             get_deposit_snapshot: timeout,
             get_validator_block: timeout,
             get_execution_payload_envelope: timeout,
+            post_execution_payload_envelope: timeout,
             default: timeout,
         }
     }
@@ -206,6 +209,8 @@ impl Timeouts {
             get_validator_block: base_timeout / HTTP_GET_VALIDATOR_BLOCK_TIMEOUT_QUOTIENT,
             get_execution_payload_envelope: base_timeout
                 / HTTP_GET_EXECUTION_PAYLOAD_ENVELOPE_TIMEOUT_QUOTIENT,
+            post_execution_payload_envelope: base_timeout
+                / HTTP_POST_EXECUTION_PAYLOAD_ENVELOPE_TIMEOUT_QUOTIENT,
             default: base_timeout / HTTP_DEFAULT_TIMEOUT_QUOTIENT,
         }
     }
@@ -2266,7 +2271,7 @@ impl BeaconNodeHttpClient {
         randao_reveal: &SignatureBytes,
         graffiti: Option<&Graffiti>,
         skip_randao_verification: SkipRandaoVerification,
-        builder_booster_factor: Option<u64>,
+        builder_boost_factor: Option<u64>,
     ) -> Result<Url, Error> {
         self.get_validator_blocks_v3_and_v4_path(
             V3,
@@ -2274,26 +2279,25 @@ impl BeaconNodeHttpClient {
             randao_reveal,
             graffiti,
             skip_randao_verification,
-            builder_booster_factor,
+            builder_boost_factor,
         )
         .await
     }
 
-    // TODO(EIP-7732): update this pending beaconapi pr review
     /// `GET v3/validator/blocks/{slot}`
     pub async fn get_validator_blocks_v3<E: EthSpec>(
         &self,
         slot: Slot,
         randao_reveal: &SignatureBytes,
         graffiti: Option<&Graffiti>,
-        builder_booster_factor: Option<u64>,
+        builder_boost_factor: Option<u64>,
     ) -> Result<(JsonProduceBlockV3Response<E>, ProduceBlockV3Metadata), Error> {
         self.get_validator_blocks_v3_modular(
             slot,
             randao_reveal,
             graffiti,
             SkipRandaoVerification::No,
-            builder_booster_factor,
+            builder_boost_factor,
         )
         .await
     }
@@ -2305,7 +2309,7 @@ impl BeaconNodeHttpClient {
         randao_reveal: &SignatureBytes,
         graffiti: Option<&Graffiti>,
         skip_randao_verification: SkipRandaoVerification,
-        builder_booster_factor: Option<u64>,
+        builder_boost_factor: Option<u64>,
     ) -> Result<(JsonProduceBlockV3Response<E>, ProduceBlockV3Metadata), Error> {
         let path = self
             .get_validator_blocks_v3_path(
@@ -2313,7 +2317,7 @@ impl BeaconNodeHttpClient {
                 randao_reveal,
                 graffiti,
                 skip_randao_verification,
-                builder_booster_factor,
+                builder_boost_factor,
             )
             .await?;
 
@@ -2355,14 +2359,14 @@ impl BeaconNodeHttpClient {
         slot: Slot,
         randao_reveal: &SignatureBytes,
         graffiti: Option<&Graffiti>,
-        builder_booster_factor: Option<u64>,
+        builder_boost_factor: Option<u64>,
     ) -> Result<(ProduceBlockV3Response<E>, ProduceBlockV3Metadata), Error> {
         self.get_validator_blocks_v3_modular_ssz::<E>(
             slot,
             randao_reveal,
             graffiti,
             SkipRandaoVerification::No,
-            builder_booster_factor,
+            builder_boost_factor,
         )
         .await
     }
@@ -2374,7 +2378,7 @@ impl BeaconNodeHttpClient {
         randao_reveal: &SignatureBytes,
         graffiti: Option<&Graffiti>,
         skip_randao_verification: SkipRandaoVerification,
-        builder_booster_factor: Option<u64>,
+        builder_boost_factor: Option<u64>,
     ) -> Result<(ProduceBlockV3Response<E>, ProduceBlockV3Metadata), Error> {
         let path = self
             .get_validator_blocks_v3_path(
@@ -2382,7 +2386,7 @@ impl BeaconNodeHttpClient {
                 randao_reveal,
                 graffiti,
                 skip_randao_verification,
-                builder_booster_factor,
+                builder_boost_factor,
             )
             .await?;
 
@@ -2644,7 +2648,7 @@ impl BeaconNodeHttpClient {
         self.post_generic_with_consensus_version(
             path,
             envelope,
-            Some(self.timeouts.proposal),
+            Some(self.timeouts.post_execution_payload_envelope),
             fork_name,
         )
         .await?;
@@ -2668,7 +2672,7 @@ impl BeaconNodeHttpClient {
         self.post_generic_with_consensus_version_and_ssz_body(
             path,
             envelope.as_ssz_bytes(),
-            Some(self.timeouts.proposal),
+            Some(self.timeouts.post_execution_payload_envelope),
             fork_name,
         )
         .await?;

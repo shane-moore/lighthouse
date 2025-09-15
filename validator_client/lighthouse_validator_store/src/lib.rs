@@ -24,7 +24,6 @@ use types::{
     SignedValidatorRegistrationData, SignedVoluntaryExit, Slot, SyncAggregatorSelectionData,
     SyncCommitteeContribution, SyncCommitteeMessage, SyncSelectionProof, SyncSubnetId,
     ValidatorRegistrationData, VoluntaryExit, graffiti::GraffitiString,
-    signed_execution_payload_envelope,
 };
 use validator_store::{
     DoppelgangerStatus, Error as ValidatorStoreError, ProposalData, SignedBlock, UnsignedBlock,
@@ -752,7 +751,6 @@ impl<T: SlotClock + 'static, E: EthSpec> ValidatorStore for LighthouseValidatorS
         block: &BeaconBlock<E>,
         current_slot: Slot,
     ) -> Result<Arc<SignedBeaconBlock<E>>, Error> {
-        // BeaconBlock is passed directly, no wrapper to unwrap
         let beacon_block = block.clone();
         self.sign_abstract_block(validator_pubkey, beacon_block, current_slot)
             .await
@@ -780,22 +778,8 @@ impl<T: SlotClock + 'static, E: EthSpec> ValidatorStore for LighthouseValidatorS
             .await
             .map_err(Error::SpecificError)?;
 
-        let signed_envelope = match envelope {
-            ExecutionPayloadEnvelope::Gloas(payload) => SignedExecutionPayloadEnvelope::Gloas(
-                signed_execution_payload_envelope::SignedExecutionPayloadEnvelopeGloas {
-                    message: payload.clone(),
-                    signature,
-                },
-            ),
-            ExecutionPayloadEnvelope::NextFork(payload) => {
-                SignedExecutionPayloadEnvelope::NextFork(
-                    signed_execution_payload_envelope::SignedExecutionPayloadEnvelopeNextFork {
-                        message: payload.clone(),
-                        signature,
-                    },
-                )
-            }
-        };
+        let signed_envelope =
+            SignedExecutionPayloadEnvelope::from_envelope(envelope.clone(), signature);
 
         Ok(signed_envelope)
     }

@@ -776,7 +776,6 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> BlockService<S, T> {
             &[validator_metrics::EXECUTION_PAYLOAD_ENVELOPE_HTTP_POST],
         );
 
-        // Create proposer fallback for envelope publishing
         let proposer_fallback = ProposerFallback {
             beacon_nodes: self.beacon_nodes.clone(),
             proposer_nodes: self.proposer_nodes.clone(),
@@ -805,7 +804,6 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> BlockService<S, T> {
         Ok(())
     }
 
-    // TODO(EIP-7732): Remove this sometime after gloas is live
     async fn get_validator_block(
         beacon_node: &BeaconNodeHttpClient,
         slot: Slot,
@@ -915,7 +913,6 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> BlockService<S, T> {
             }
         };
 
-        // V4 endpoint always returns BeaconBlock, no blinded concept
         let block_proposer = unsigned_block.proposer_index();
 
         info!(slot = slot.as_u64(), "Received unsigned v4 block");
@@ -928,7 +925,6 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> BlockService<S, T> {
         Ok::<_, BlockError>(unsigned_block)
     }
 
-    /// Sign execution payload envelope using ValidatorStore
     async fn sign_execution_payload_envelope(
         &self,
         envelope: &types::ExecutionPayloadEnvelope<S::E>,
@@ -969,7 +965,6 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> BlockService<S, T> {
         Ok(signed_envelope)
     }
 
-    /// Get execution payload envelope from the source beacon node
     async fn get_execution_payload_envelope(
         &self,
         slot: Slot,
@@ -981,7 +976,6 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> BlockService<S, T> {
             &[validator_metrics::EXECUTION_PAYLOAD_ENVELOPE_HTTP_GET],
         );
 
-        // Get the builder index for this validator
         let builder_index = match self.validator_store.validator_index(validator_pubkey) {
             Some(index) => index,
             None => {
@@ -1037,7 +1031,6 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> BlockService<S, T> {
         }
     }
 
-    /// Publish execution payload envelope for validators who are also builders
     async fn publish_execution_payload_envelope(
         &self,
         slot: Slot,

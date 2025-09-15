@@ -1711,7 +1711,6 @@ fn dummy_consensus_version() -> ForkName {
     ForkName::Base
 }
 
-// TODO(EIP-7732): update this pending reviews of beacon api PR https://github.com/ethereum/beacon-APIs/pull/552
 /// Metadata about a `ProduceBlockV3Response` which is returned in the body & headers.
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ProduceBlockV3Metadata {
