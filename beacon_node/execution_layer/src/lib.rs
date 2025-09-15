@@ -911,6 +911,13 @@ impl<E: EthSpec> ExecutionLayer<E> {
                     return Err(e);
                 }
             },
+            BlockProductionVersion::V4 => {
+                // V4 is for post-Gloas: always return full blocks (no blinded concept)
+                self.get_full_payload_with(payload_parameters, noop)
+                    .await
+                    .and_then(GetPayloadResponseType::try_into)
+                    .map(ProvenancedPayload::Local)?
+            },
             BlockProductionVersion::BlindedV2 => {
                 let _timer = metrics::start_timer_vec(
                     &metrics::EXECUTION_LAYER_REQUEST_TIMES,

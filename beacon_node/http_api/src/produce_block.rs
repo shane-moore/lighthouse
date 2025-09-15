@@ -9,7 +9,7 @@ use crate::{
 use beacon_chain::{
     BeaconBlockResponseWrapper, BeaconChain, BeaconChainTypes, ProduceBlockVerification,
 };
-use eth2::types::{self as api_types, ProduceBlockV3Metadata, SkipRandaoVerification};
+use eth2::types::{self as api_types, ProduceBlockV3Metadata, ProduceBlockV4Metadata, SkipRandaoVerification};
 use ssz::Encode;
 use std::sync::Arc;
 use types::{payload::BlockProductionVersion, *};
@@ -210,5 +210,89 @@ pub fn build_response_v2<T: BeaconChainTypes>(
             block_contents,
         ))
         .into_response()),
+    }
+}
+
+pub async fn produce_block_v4<T: BeaconChainTypes>(
+    accept_header: Option<api_types::Accept>,
+    chain: Arc<BeaconChain<T>>,
+    slot: Slot,
+    query: api_types::ValidatorBlocksQuery,
+) -> Result<Response<Body>, warp::Rejection> {
+    let randao_reveal = query.randao_reveal.decompress().map_err(|e| {
+        warp_utils::reject::custom_bad_request(format!(
+            "randao reveal is not a valid BLS signature: {:?}",
+            e
+        ))
+    })?;
+
+    let randao_verification = get_randao_verification(&query, randao_reveal.is_infinity())?;
+    let builder_boost_factor = if query.builder_boost_factor == Some(DEFAULT_BOOST_FACTOR) {
+        None
+    } else {
+        query.builder_boost_factor
+    };
+
+    let block_response_type = chain
+        .produce_block_with_verification(
+            randao_reveal,
+            slot,
+            query.graffiti,
+            randao_verification,
+            builder_boost_factor,
+            BlockProductionVersion::V4,
+        )
+        .await
+        .map_err(|e| {
+            warp_utils::reject::custom_bad_request(format!("failed to fetch a block: {:?}", e))
+        })?;
+
+    build_response_v4(chain, block_response_type, accept_header)
+}
+
+pub fn build_response_v4<T: BeaconChainTypes>(
+    chain: Arc<BeaconChain<T>>,
+    block_response: BeaconBlockResponseWrapper<T::EthSpec>,
+    accept_header: Option<api_types::Accept>,
+) -> Result<Response<Body>, warp::Rejection> {
+    let fork_name = block_response
+        .fork_name(&chain.spec)
+        .map_err(inconsistent_fork_rejection)?;
+    let consensus_block_value = block_response.consensus_block_value_wei();
+
+    let metadata = ProduceBlockV4Metadata {
+        consensus_version: fork_name,
+        consensus_block_value,
+    };
+
+    // V4 always returns full blocks (no blinded concept for post-Gloas)
+    let block = match block_response {
+        BeaconBlockResponseWrapper::Full(response) => response.block,
+        BeaconBlockResponseWrapper::Blinded(_) => {
+            return Err(warp_utils::reject::custom_server_error(
+                "V4 endpoints should never return blinded blocks".to_string(),
+            ));
+        }
+    };
+
+    match accept_header {
+        Some(api_types::Accept::Ssz) => Response::builder()
+            .status(200)
+            .body(block.as_ssz_bytes().into())
+            .map(|res: Response<Body>| add_ssz_content_type_header(res))
+            .map(|res: Response<Body>| add_consensus_version_header(res, fork_name))
+            .map(|res| add_consensus_block_value_header(res, consensus_block_value))
+            .map_err(|e| -> warp::Rejection {
+                warp_utils::reject::custom_server_error(format!("failed to create response: {}", e))
+            }),
+        _ => Ok(warp::reply::json(&ForkVersionedResponse {
+            version: fork_name,
+            metadata,
+            data: block,
+        })
+        .into_response())
+        .map(|res| res.into_response())
+        .map(|res| add_consensus_version_header(res, fork_name))
+        .map(|res| add_consensus_block_value_header(res, consensus_block_value)),
     }
 }

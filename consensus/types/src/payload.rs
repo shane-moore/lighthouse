@@ -1156,6 +1156,7 @@ impl<E: EthSpec> From<BlindedPayload<E>> for ExecutionPayloadHeader<E> {
 /// The block production flow version to be used.
 pub enum BlockProductionVersion {
     V3,
+    V4,
     BlindedV2,
     FullV2,
 }

@@ -33,7 +33,7 @@ mod validator_inclusion;
 mod validators;
 mod version;
 use crate::light_client::{get_light_client_bootstrap, get_light_client_updates};
-use crate::produce_block::{produce_blinded_block_v2, produce_block_v2, produce_block_v3};
+use crate::produce_block::{produce_blinded_block_v2, produce_block_v2, produce_block_v3, produce_block_v4};
 use crate::version::beacon_response;
 use beacon_chain::{
     AttestationError as AttnError, BeaconChain, BeaconChainError, BeaconChainTypes,
@@ -3350,10 +3350,10 @@ pub fn serve<T: BeaconChainTypes>(
 
                     not_synced_filter?;
 
-                    if endpoint_version == V3 {
-                        produce_block_v3(accept_header, chain, slot, query).await
-                    } else {
-                        produce_block_v2(accept_header, chain, slot, query).await
+                    match endpoint_version {
+                        V4 => produce_block_v4(accept_header, chain, slot, query).await,
+                        V3 => produce_block_v3(accept_header, chain, slot, query).await,
+                        _ => produce_block_v2(accept_header, chain, slot, query).await,
                     }
                 })
             },
