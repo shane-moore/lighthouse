@@ -2933,6 +2933,8 @@ impl BeaconNodeHttpClient {
             .await
     }
 
+    // TODO(EIP-7732): Create corresponding beacon node response endpoint per spec
+    // https://github.com/ethereum/beacon-APIs/pull/552
     /// `POST validator/duties/ptc/{epoch}`
     pub async fn post_validator_duties_ptc(
         &self,

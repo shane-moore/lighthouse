@@ -410,7 +410,7 @@ pub struct DutiesService<S, T> {
     pub proposers: RwLock<ProposerMap>,
     /// Map from validator index to sync committee duties.
     pub sync_duties: SyncDutiesMap,
-    /// Maps an epoch to all *local* PTC duties for that epoch with their dependent root.
+    /// Maps an epoch to PTC duties for locally-managed validators.
     pub ptc_duties: RwLock<PtcMap>,
     /// Provides the canonical list of locally-managed validators.
     pub validator_store: Arc<S>,
@@ -1242,25 +1242,6 @@ fn get_uninitialized_validators<S: ValidatorStore, T: SlotClock + 'static>(
         .collect::<Vec<_>>()
 }
 
-/// Get a filtered list of local validators for which we don't already know their PTC duties for that epoch
-fn get_uninitialized_ptc_validators<S: ValidatorStore, T: SlotClock + 'static>(
-    duties_service: &Arc<DutiesService<S, T>>,
-    epoch: &Epoch,
-    local_pubkeys: &HashSet<PublicKeyBytes>,
-) -> Vec<u64> {
-    let ptc_duties = duties_service.ptc_duties.read();
-
-    local_pubkeys
-        .iter()
-        .filter(|pubkey| {
-            ptc_duties
-                .get(epoch)
-                .map_or(true, |(_, duties)| !duties.contains_key(pubkey))
-        })
-        .filter_map(|pubkey| duties_service.validator_store.validator_index(pubkey))
-        .collect::<Vec<_>>()
-}
-
 fn update_per_validator_duty_metrics<S: ValidatorStore, T: SlotClock + 'static>(
     duties_service: &Arc<DutiesService<S, T>>,
     epoch: Epoch,
@@ -1806,17 +1787,12 @@ async fn poll_beacon_ptc_attesters_for_epoch<
         &[validator_metrics::UPDATE_PTC_FETCH],
     );
 
-    // Request duties for all uninitialized validators. If there isn't any, we will just request for
-    // `INITIAL_PTC_DUTIES_QUERY_SIZE` validators. We use the `dependent_root` in the response to
-    // determine whether validator duties need to be updated. This is to ensure that we don't
-    // request for extra data unless necessary in order to save on network bandwidth.
-    let uninitialized_validators =
-        get_uninitialized_ptc_validators(duties_service, &epoch, local_pubkeys);
-    let initial_indices_to_request = if !uninitialized_validators.is_empty() {
-        uninitialized_validators.as_slice()
-    } else {
-        &local_indices[0..min(INITIAL_PTC_DUTIES_QUERY_SIZE, local_indices.len())]
-    };
+    // Make a small initial request to check the dependent_root and determine if we need to fetch
+    // all duties. We use the `dependent_root` in the response to determine whether validator
+    // duties need to be updated. This is to ensure that we don't request for extra data unless
+    // necessary in order to save on network bandwidth.
+    let initial_indices_to_request =
+        &local_indices[0..min(INITIAL_PTC_DUTIES_QUERY_SIZE, local_indices.len())];
 
     let response =
         post_validator_duties_ptc(duties_service, epoch, initial_indices_to_request).await?;
