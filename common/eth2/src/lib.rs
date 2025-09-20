@@ -62,6 +62,8 @@ const HTTP_SYNC_COMMITTEE_CONTRIBUTION_TIMEOUT_QUOTIENT: u32 = 4;
 const HTTP_SYNC_DUTIES_TIMEOUT_QUOTIENT: u32 = 4;
 // TODO(EIP-7732): Determine what this quotient should be
 const HTTP_PTC_DUTIES_TIMEOUT_QUOTIENT: u32 = 4;
+// TODO(EIP-7732): Determine what this quotient should be
+const HTTP_PAYLOAD_ATTESTATION_TIMEOUT_QUOTIENT: u32 = 4;
 const HTTP_GET_BEACON_BLOCK_SSZ_TIMEOUT_QUOTIENT: u32 = 4;
 const HTTP_GET_DEBUG_BEACON_STATE_QUOTIENT: u32 = 4;
 const HTTP_GET_DEPOSIT_SNAPSHOT_QUOTIENT: u32 = 4;
@@ -158,6 +160,7 @@ pub struct Timeouts {
     pub sync_committee_contribution: Duration,
     pub sync_duties: Duration,
     pub ptc_duties: Duration,
+    pub payload_attestation: Duration,
     pub get_beacon_blocks_ssz: Duration,
     pub get_debug_beacon_states: Duration,
     pub get_deposit_snapshot: Duration,
@@ -177,6 +180,7 @@ impl Timeouts {
             sync_committee_contribution: timeout,
             sync_duties: timeout,
             ptc_duties: timeout,
+            payload_attestation: timeout,
             get_beacon_blocks_ssz: timeout,
             get_debug_beacon_states: timeout,
             get_deposit_snapshot: timeout,
@@ -198,6 +202,7 @@ impl Timeouts {
                 / HTTP_SYNC_COMMITTEE_CONTRIBUTION_TIMEOUT_QUOTIENT,
             sync_duties: base_timeout / HTTP_SYNC_DUTIES_TIMEOUT_QUOTIENT,
             ptc_duties: base_timeout / HTTP_PTC_DUTIES_TIMEOUT_QUOTIENT,
+            payload_attestation: base_timeout / HTTP_PAYLOAD_ATTESTATION_TIMEOUT_QUOTIENT,
             get_beacon_blocks_ssz: base_timeout / HTTP_GET_BEACON_BLOCK_SSZ_TIMEOUT_QUOTIENT,
             get_debug_beacon_states: base_timeout / HTTP_GET_DEBUG_BEACON_STATE_QUOTIENT,
             get_deposit_snapshot: base_timeout / HTTP_GET_DEPOSIT_SNAPSHOT_QUOTIENT,
@@ -2604,6 +2609,49 @@ impl BeaconNodeHttpClient {
         self.get_opt_with_timeout(path, self.timeouts.attestation)
             .await
             .map(|opt| opt.map(BeaconResponse::ForkVersioned))
+    }
+
+    /// `GET validator/payload_attestation_data/{slot}`
+    pub async fn get_validator_payload_attestation_data(
+        &self,
+        slot: Slot,
+    ) -> Result<BeaconResponse<PayloadAttestationData>, Error> {
+        let mut path = self.eth_path(V1)?;
+
+        path.path_segments_mut()
+            .map_err(|()| Error::InvalidUrl(self.server.clone()))?
+            .push("validator")
+            .push("payload_attestation_data")
+            .push(&slot.to_string());
+
+        self.get_with_timeout(path, self.timeouts.payload_attestation)
+            .await
+            .map(BeaconResponse::ForkVersioned)
+    }
+
+    /// `POST beacon/pool/payload_attestations`
+    pub async fn post_beacon_pool_payload_attestations(
+        &self,
+        payload_attestations: Vec<PayloadAttestationMessage>,
+        fork_name: ForkName,
+    ) -> Result<(), Error> {
+        let mut path = self.eth_path(V1)?;
+
+        path.path_segments_mut()
+            .map_err(|()| Error::InvalidUrl(self.server.clone()))?
+            .push("beacon")
+            .push("pool")
+            .push("payload_attestations");
+
+        self.post_with_timeout_and_consensus_header(
+            path,
+            &payload_attestations,
+            self.timeouts.payload_attestation,
+            fork_name,
+        )
+        .await?;
+
+        Ok(())
     }
 
     /// `GET validator/sync_committee_contribution`

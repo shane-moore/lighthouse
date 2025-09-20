@@ -98,7 +98,7 @@ pub struct ValidatorClient {
 
     #[clap(
         long,
-        help = "Disable the performance of attestation duties (and sync committee duties). This \
+        help = "Disable the performance of attestation duties (also sync committee duties and payload attestation duties). This \
                 flag should only be used in emergencies to prioritise block proposal duties.",
         display_order = 0,
         help_heading = FLAG_HEADER

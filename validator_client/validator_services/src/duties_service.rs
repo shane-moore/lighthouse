@@ -1157,7 +1157,6 @@ fn get_uninitialized_validators<S: ValidatorStore, T: SlotClock + 'static>(
         .collect::<Vec<_>>()
 }
 
-
 fn update_per_validator_duty_metrics<S: ValidatorStore, T: SlotClock + 'static>(
     duties_service: &Arc<DutiesService<S, T>>,
     epoch: Epoch,
@@ -1649,7 +1648,8 @@ async fn poll_beacon_ptc_attesters_for_epoch<
     // all duties. We use the `dependent_root` in the response to determine whether validator
     // duties need to be updated. This is to ensure that we don't request for extra data unless
     // necessary in order to save on network bandwidth.
-    let initial_indices_to_request = &local_indices[0..min(INITIAL_PTC_DUTIES_QUERY_SIZE, local_indices.len())];
+    let initial_indices_to_request =
+        &local_indices[0..min(INITIAL_PTC_DUTIES_QUERY_SIZE, local_indices.len())];
 
     let response =
         post_validator_duties_ptc(duties_service, epoch, initial_indices_to_request).await?;

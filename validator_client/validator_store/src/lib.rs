@@ -5,9 +5,10 @@ use std::future::Future;
 use std::sync::Arc;
 use types::{
     Address, Attestation, AttestationError, BlindedBeaconBlock, Epoch, EthSpec, Graffiti, Hash256,
-    PublicKeyBytes, SelectionProof, Signature, SignedAggregateAndProof, SignedBlindedBeaconBlock,
-    SignedContributionAndProof, SignedValidatorRegistrationData, Slot, SyncCommitteeContribution,
-    SyncCommitteeMessage, SyncSelectionProof, SyncSubnetId, ValidatorRegistrationData,
+    PayloadAttestationMessage, PublicKeyBytes, SelectionProof, Signature, SignedAggregateAndProof,
+    SignedBlindedBeaconBlock, SignedContributionAndProof, SignedValidatorRegistrationData, Slot,
+    SyncCommitteeContribution, SyncCommitteeMessage, SyncSelectionProof, SyncSubnetId,
+    ValidatorRegistrationData,
 };
 
 #[derive(Debug, PartialEq, Clone)]
@@ -107,6 +108,12 @@ pub trait ValidatorStore: Send + Sync {
         validator_committee_position: usize,
         attestation: &mut Attestation<Self::E>,
         current_epoch: Epoch,
+    ) -> impl Future<Output = Result<(), Error<Self::Error>>> + Send;
+
+    fn sign_payload_attestation_message(
+        &self,
+        validator_pubkey: PublicKeyBytes,
+        payload_attestation_message: &mut PayloadAttestationMessage,
     ) -> impl Future<Output = Result<(), Error<Self::Error>>> + Send;
 
     fn sign_validator_registration_data(

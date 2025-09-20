@@ -28,6 +28,9 @@ pub const UPDATE_PTC_FETCH: &str = "update_ptc_fetch";
 pub const UPDATE_PTC_STORE: &str = "update_ptc_store";
 pub const ATTESTER_DUTIES_HTTP_POST: &str = "attester_duties_http_post";
 pub const PTC_DUTIES_HTTP_POST: &str = "ptc_duties_http_post";
+pub const PAYLOAD_ATTESTATIONS: &str = "payload_attestations";
+pub const PAYLOAD_ATTESTATION_HTTP_GET: &str = "payload_attestation_http_get";
+pub const PAYLOAD_ATTESTATION_HTTP_POST: &str = "payload_attestation_http_post";
 pub const PROPOSER_DUTIES_HTTP_GET: &str = "proposer_duties_http_get";
 pub const VALIDATOR_DUTIES_SYNC_HTTP_POST: &str = "validator_duties_sync_http_post";
 pub const VALIDATOR_ID_HTTP_GET: &str = "validator_id_http_get";
@@ -140,6 +143,14 @@ pub static ATTESTATION_SERVICE_TIMES: LazyLock<Result<HistogramVec>> = LazyLock:
         &["task"],
     )
 });
+pub static PAYLOAD_ATTESTATION_SERVICE_TIMES: LazyLock<Result<HistogramVec>> =
+    LazyLock::new(|| {
+        try_create_histogram_vec(
+            "vc_payload_attestation_service_task_times_seconds",
+            "Duration to perform payload attestation service tasks",
+            &["task"],
+        )
+    });
 pub static SLASHING_PROTECTION_PRUNE_TIMES: LazyLock<Result<Histogram>> = LazyLock::new(|| {
     try_create_histogram(
         "vc_slashing_protection_prune_times_seconds",

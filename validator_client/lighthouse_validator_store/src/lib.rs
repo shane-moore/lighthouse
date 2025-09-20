@@ -19,11 +19,11 @@ use tracing::{error, info, warn};
 use types::{
     AbstractExecPayload, Address, AggregateAndProof, Attestation, BeaconBlock, BlindedPayload,
     ChainSpec, ContributionAndProof, Domain, Epoch, EthSpec, Fork, Graffiti, Hash256,
-    PublicKeyBytes, SelectionProof, Signature, SignedAggregateAndProof, SignedBeaconBlock,
-    SignedContributionAndProof, SignedRoot, SignedValidatorRegistrationData, SignedVoluntaryExit,
-    Slot, SyncAggregatorSelectionData, SyncCommitteeContribution, SyncCommitteeMessage,
-    SyncSelectionProof, SyncSubnetId, ValidatorRegistrationData, VoluntaryExit,
-    graffiti::GraffitiString,
+    PayloadAttestationMessage, PublicKeyBytes, SelectionProof, Signature, SignedAggregateAndProof,
+    SignedBeaconBlock, SignedContributionAndProof, SignedRoot, SignedValidatorRegistrationData,
+    SignedVoluntaryExit, Slot, SyncAggregatorSelectionData, SyncCommitteeContribution,
+    SyncCommitteeMessage, SyncSelectionProof, SyncSubnetId, ValidatorRegistrationData,
+    VoluntaryExit, graffiti::GraffitiString,
 };
 use validator_store::{
     DoppelgangerStatus, Error as ValidatorStoreError, ProposalData, SignedBlock, UnsignedBlock,
@@ -743,6 +743,38 @@ impl<T: SlotClock + 'static, E: EthSpec> ValidatorStore for LighthouseValidatorS
                 .await
                 .map(|block| SignedBlock::Blinded(Arc::new(block))),
         }
+    }
+
+    async fn sign_payload_attestation_message(
+        &self,
+        validator_pubkey: PublicKeyBytes,
+        payload_attestation_message: &mut PayloadAttestationMessage,
+    ) -> Result<(), Error> {
+        // Get the signing method and check doppelganger protection.
+        let signing_method = self.doppelganger_checked_signing_method(validator_pubkey)?;
+
+        // Calculate the signing epoch from the payload attestation data slot
+        let signing_epoch = payload_attestation_message
+            .data
+            .slot
+            .epoch(E::slots_per_epoch());
+        let signing_context = self.signing_context(Domain::PTCAttester, signing_epoch);
+
+        // Unlike regular attestations, payload attestations are NOT slashable offenses,
+        // so we don't need slashing protection checks
+        let signature = signing_method
+            .get_signature::<E, BlindedPayload<E>>(
+                SignableMessage::PayloadAttestationData(&payload_attestation_message.data),
+                signing_context,
+                &self.spec,
+                &self.task_executor,
+            )
+            .await
+            .map_err(Error::SpecificError)?;
+
+        payload_attestation_message.signature = (&signature).into();
+
+        Ok(())
     }
 
     async fn sign_attestation(

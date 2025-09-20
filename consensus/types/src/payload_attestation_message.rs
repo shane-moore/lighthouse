@@ -15,6 +15,17 @@ pub struct PayloadAttestationMessage {
     pub signature: AggregateSignature,
 }
 
+impl PayloadAttestationMessage {
+    /// Create a `PayloadAttestationMessage` with an empty signature for signing purposes.
+    pub fn empty_for_signing(validator_index: u64, data: PayloadAttestationData) -> Self {
+        Self {
+            validator_index,
+            data,
+            signature: AggregateSignature::empty(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
