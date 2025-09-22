@@ -111,7 +111,7 @@ pub struct Inner<S, T> {
     disable: bool,
 }
 
-/// Attempts to produce attestations for all known validators 1/3rd of the way through each slot.
+/// Attempts to produce attestations for all known validators 1/3rd of the way through each slot for pre-gloas blocks and 1/4 of the way through each slot post-gloas.
 ///
 /// If any validators are on the same committee, a single attestation will be downloaded and
 /// returned to the beacon node. This attestation will have a signature from each of the
@@ -159,8 +159,20 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> AttestationService<S, 
 
         let interval_fut = async move {
             loop {
-                if let Some(duration_to_next_slot) = self.slot_clock.duration_to_next_slot() {
-                    sleep(duration_to_next_slot + slot_duration / 3).await;
+                if let (Some(duration_to_next_slot), Some(current_slot)) = (
+                    self.slot_clock.duration_to_next_slot(),
+                    self.slot_clock.now(),
+                ) {
+                    // For post-Gloas slots, attestations should be published at 1/4 of slot duration
+                    // For pre-Gloas slots, maintain the existing 1/3 timing
+                    let fork_name = self.chain_spec.fork_name_at_slot::<S::E>(current_slot);
+                    let attestation_delay = if fork_name.gloas_enabled() {
+                        slot_duration / 4
+                    } else {
+                        slot_duration / 3
+                    };
+
+                    sleep(duration_to_next_slot + attestation_delay).await;
 
                     if let Err(e) = self.spawn_attestation_tasks(slot_duration) {
                         crit!(error = e, "Failed to spawn attestation tasks")
@@ -189,11 +201,20 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> AttestationService<S, 
             .duration_to_next_slot()
             .ok_or("Unable to determine duration to next slot")?;
 
-        // If a validator needs to publish an aggregate attestation, they must do so at 2/3
-        // through the slot. This delay triggers at this time
+        let aggregate_delay = {
+            let fork_name = self.chain_spec.fork_name_at_slot::<S::E>(slot);
+            if fork_name.gloas_enabled() {
+                // Post-Gloas: publish at 1/2 slot duration (slot_duration / 2 before end)
+                slot_duration / 2
+            } else {
+                // Pre-Gloas: publish at 2/3 slot duration (slot_duration / 3 before end)
+                slot_duration / 3
+            }
+        };
+
         let aggregate_production_instant = Instant::now()
             + duration_to_next_slot
-                .checked_sub(slot_duration / 3)
+                .checked_sub(aggregate_delay)
                 .unwrap_or_else(|| Duration::from_secs(0));
 
         let duties_by_committee_index: HashMap<CommitteeIndex, Vec<DutyAndProof>> = self
@@ -282,10 +303,9 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> AttestationService<S, 
         //
         // If an attestation was produced, make an aggregate.
         if let Some(attestation_data) = attestation_opt {
-            // First, wait until the `aggregation_production_instant` (2/3rds
-            // of the way though the slot). As verified in the
-            // `delay_triggers_when_in_the_past` test, this code will still run
-            // even if the instant has already elapsed.
+            // First, wait until the `aggregation_production_instant` (2/3rds for pre-Gloas,
+            // 1/2 for post-Gloas). As verified in the `delay_triggers_when_in_the_past` test,
+            // this code will still run even if the instant has already elapsed.
             sleep_until(aggregate_production_instant).await;
 
             // Start the metrics timer *after* we've done the delay.

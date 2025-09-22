@@ -107,9 +107,22 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> SyncCommitteeService<S
 
         let interval_fut = async move {
             loop {
-                if let Some(duration_to_next_slot) = self.slot_clock.duration_to_next_slot() {
-                    // Wait for contribution broadcast interval 1/3 of the way through the slot.
-                    sleep(duration_to_next_slot + slot_duration / 3).await;
+                if let (Some(duration_to_next_slot), Some(current_slot)) = (
+                    self.slot_clock.duration_to_next_slot(),
+                    self.slot_clock.now(),
+                ) {
+                    // Wait for contribution broadcast interval. For post-Gloas: 1/4 through the slot.
+                    // For pre-Gloas: 1/3 through the slot
+                    let fork_name = self
+                        .duties_service
+                        .spec
+                        .fork_name_at_slot::<S::E>(current_slot);
+                    let sync_contribution_delay = if fork_name.gloas_enabled() {
+                        slot_duration / 4
+                    } else {
+                        slot_duration / 3
+                    };
+                    sleep(duration_to_next_slot + sync_contribution_delay).await;
 
                     // Do nothing if the Altair fork has not yet occurred.
                     if !self.altair_fork_activated() {
@@ -146,11 +159,19 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> SyncCommitteeService<S
             .duration_to_next_slot()
             .ok_or("Unable to determine duration to next slot")?;
 
-        // If a validator needs to publish a sync aggregate, they must do so at 2/3
-        // through the slot. This delay triggers at this time
+        // If a validator needs to publish a sync aggregate, they must do so at:
+        // Post-Gloas: 1/2 through the slot
+        // Pre-Gloas: 2/3 through the slot
+        // This delay triggers at this time
+        let fork_name = self.duties_service.spec.fork_name_at_slot::<S::E>(slot);
+        let aggregate_delay = if fork_name.gloas_enabled() {
+            slot_duration / 2
+        } else {
+            slot_duration / 3
+        };
         let aggregate_production_instant = Instant::now()
             + duration_to_next_slot
-                .checked_sub(slot_duration / 3)
+                .checked_sub(aggregate_delay)
                 .unwrap_or_else(|| Duration::from_secs(0));
 
         let Some(slot_duties) = self
