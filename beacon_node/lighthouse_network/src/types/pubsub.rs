@@ -8,14 +8,12 @@ use std::io::{Error, ErrorKind};
 use std::sync::Arc;
 use types::{
     AttesterSlashing, AttesterSlashingBase, AttesterSlashingElectra, BlobSidecar,
-    DataColumnSidecar, DataColumnSubnetId, EthSpec, ForkContext, ForkName,
+    DataColumnSidecar, DataColumnSubnetId, EthSpec, ForkContext, ForkVersionDecode,
     LightClientFinalityUpdate, LightClientOptimisticUpdate, ProposerSlashing,
     SignedAggregateAndProof, SignedAggregateAndProofBase, SignedAggregateAndProofElectra,
-    SignedBeaconBlock, SignedBeaconBlockAltair, SignedBeaconBlockBase, SignedBeaconBlockBellatrix,
-    SignedBeaconBlockCapella, SignedBeaconBlockDeneb, SignedBeaconBlockElectra,
-    SignedBeaconBlockFulu, SignedBeaconBlockGloas, SignedBlsToExecutionChange,
-    SignedContributionAndProof, SignedVoluntaryExit, SingleAttestation, SubnetId,
-    SyncCommitteeMessage, SyncSubnetId,
+    SignedBeaconBlock, SignedBlsToExecutionChange, SignedContributionAndProof,
+    SignedExecutionPayloadEnvelope, SignedExecutionPayloadEnvelopeGloas, SignedVoluntaryExit,
+    SingleAttestation, SubnetId, SyncCommitteeMessage, SyncSubnetId,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -42,6 +40,8 @@ pub enum PubsubMessage<E: EthSpec> {
     SyncCommitteeMessage(Box<(SyncSubnetId, SyncCommitteeMessage)>),
     /// Gossipsub message for BLS to execution change messages.
     BlsToExecutionChange(Box<SignedBlsToExecutionChange>),
+    /// Gossipsub message providing notification of a signed execution payload envelope.
+    ExecutionPayload(Box<SignedExecutionPayloadEnvelope<E>>),
     /// Gossipsub message providing notification of a light client finality update.
     LightClientFinalityUpdate(Box<LightClientFinalityUpdate<E>>),
     /// Gossipsub message providing notification of a light client optimistic update.
@@ -145,6 +145,7 @@ impl<E: EthSpec> PubsubMessage<E> {
             PubsubMessage::SignedContributionAndProof(_) => GossipKind::SignedContributionAndProof,
             PubsubMessage::SyncCommitteeMessage(data) => GossipKind::SyncCommitteeMessage(data.0),
             PubsubMessage::BlsToExecutionChange(_) => GossipKind::BlsToExecutionChange,
+            PubsubMessage::ExecutionPayload(_) => GossipKind::ExecutionPayload,
             PubsubMessage::LightClientFinalityUpdate(_) => GossipKind::LightClientFinalityUpdate,
             PubsubMessage::LightClientOptimisticUpdate(_) => {
                 GossipKind::LightClientOptimisticUpdate
@@ -211,38 +212,11 @@ impl<E: EthSpec> PubsubMessage<E> {
                         let beacon_block = match fork_context
                             .get_fork_from_context_bytes(gossip_topic.fork_digest)
                         {
-                            Some(ForkName::Base) => SignedBeaconBlock::<E>::Base(
-                                SignedBeaconBlockBase::from_ssz_bytes(data)
-                                    .map_err(|e| format!("{:?}", e))?,
-                            ),
-                            Some(ForkName::Altair) => SignedBeaconBlock::<E>::Altair(
-                                SignedBeaconBlockAltair::from_ssz_bytes(data)
-                                    .map_err(|e| format!("{:?}", e))?,
-                            ),
-                            Some(ForkName::Bellatrix) => SignedBeaconBlock::<E>::Bellatrix(
-                                SignedBeaconBlockBellatrix::from_ssz_bytes(data)
-                                    .map_err(|e| format!("{:?}", e))?,
-                            ),
-                            Some(ForkName::Capella) => SignedBeaconBlock::<E>::Capella(
-                                SignedBeaconBlockCapella::from_ssz_bytes(data)
-                                    .map_err(|e| format!("{:?}", e))?,
-                            ),
-                            Some(ForkName::Deneb) => SignedBeaconBlock::<E>::Deneb(
-                                SignedBeaconBlockDeneb::from_ssz_bytes(data)
-                                    .map_err(|e| format!("{:?}", e))?,
-                            ),
-                            Some(ForkName::Electra) => SignedBeaconBlock::<E>::Electra(
-                                SignedBeaconBlockElectra::from_ssz_bytes(data)
-                                    .map_err(|e| format!("{:?}", e))?,
-                            ),
-                            Some(ForkName::Fulu) => SignedBeaconBlock::<E>::Fulu(
-                                SignedBeaconBlockFulu::from_ssz_bytes(data)
-                                    .map_err(|e| format!("{:?}", e))?,
-                            ),
-                            Some(ForkName::Gloas) => SignedBeaconBlock::<E>::Gloas(
-                                SignedBeaconBlockGloas::from_ssz_bytes(data)
-                                    .map_err(|e| format!("{:?}", e))?,
-                            ),
+                            // TODO(EIP-7732): check with lighthouse team if there's any issue with simplifying to from_ssz_bytes_by_fork here. if so, perhaps we can add that as a comment
+                            Some(fork_name) => {
+                                SignedBeaconBlock::<E>::from_ssz_bytes_by_fork(data, *fork_name)
+                                    .map_err(|e| format!("{:?}", e))?
+                            }
                             None => {
                                 return Err(format!(
                                     "Unknown gossipsub fork digest: {:?}",
@@ -349,6 +323,35 @@ impl<E: EthSpec> PubsubMessage<E> {
                             bls_to_execution_change,
                         )))
                     }
+                    GossipKind::ExecutionPayload => {
+                        let signed_execution_payload_envelope = match fork_context
+                            .get_fork_from_context_bytes(gossip_topic.fork_digest)
+                        {
+                            Some(&fork_name) => {
+                                if fork_name.gloas_enabled() {
+                                    // TODO(EIP-7732): replace this with SignedExecutionPayloadEnvelope::from_ssz_bytes_for_fork once this branch is merged: https://github.com/shane-moore/lighthouse/tree/gloas-vc-publish-block
+                                    SignedExecutionPayloadEnvelope::Gloas(
+                                        SignedExecutionPayloadEnvelopeGloas::from_ssz_bytes(data)
+                                            .map_err(|e| format!("{:?}", e))?,
+                                    )
+                                } else {
+                                    return Err(format!(
+                                        "execution_payload topic not supported for fork {:?}",
+                                        fork_name
+                                    ));
+                                }
+                            }
+                            None => {
+                                return Err(format!(
+                                    "execution_payload topic invalid for given fork digest {:?}",
+                                    gossip_topic.fork_digest
+                                ));
+                            }
+                        };
+                        Ok(PubsubMessage::ExecutionPayload(Box::new(
+                            signed_execution_payload_envelope,
+                        )))
+                    }
                     GossipKind::LightClientFinalityUpdate => {
                         let light_client_finality_update = match fork_context
                             .get_fork_from_context_bytes(gossip_topic.fork_digest)
@@ -411,6 +414,7 @@ impl<E: EthSpec> PubsubMessage<E> {
             PubsubMessage::SignedContributionAndProof(data) => data.as_ssz_bytes(),
             PubsubMessage::SyncCommitteeMessage(data) => data.1.as_ssz_bytes(),
             PubsubMessage::BlsToExecutionChange(data) => data.as_ssz_bytes(),
+            PubsubMessage::ExecutionPayload(data) => data.as_ssz_bytes(),
             PubsubMessage::LightClientFinalityUpdate(data) => data.as_ssz_bytes(),
             PubsubMessage::LightClientOptimisticUpdate(data) => data.as_ssz_bytes(),
         }
@@ -464,6 +468,14 @@ impl<E: EthSpec> std::fmt::Display for PubsubMessage<E> {
                     f,
                     "Signed BLS to execution change: validator_index: {}, address: {:?}",
                     data.message.validator_index, data.message.to_execution_address
+                )
+            }
+            PubsubMessage::ExecutionPayload(data) => {
+                write!(
+                    f,
+                    "Signed Execution Payload Envelope: slot: {}, builder_index: {}",
+                    data.message().slot(),
+                    data.message().builder_index()
                 )
             }
             PubsubMessage::LightClientFinalityUpdate(_data) => {
