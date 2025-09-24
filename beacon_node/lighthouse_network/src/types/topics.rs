@@ -23,6 +23,7 @@ pub const SIGNED_CONTRIBUTION_AND_PROOF_TOPIC: &str = "sync_committee_contributi
 pub const SYNC_COMMITTEE_PREFIX_TOPIC: &str = "sync_committee_";
 pub const BLS_TO_EXECUTION_CHANGE_TOPIC: &str = "bls_to_execution_change";
 pub const EXECUTION_PAYLOAD_TOPIC: &str = "execution_payload";
+pub const PAYLOAD_ATTESTATION_MESSAGE_TOPIC: &str = "payload_attestation_message";
 pub const LIGHT_CLIENT_FINALITY_UPDATE: &str = "light_client_finality_update";
 pub const LIGHT_CLIENT_OPTIMISTIC_UPDATE: &str = "light_client_optimistic_update";
 
@@ -94,6 +95,7 @@ pub fn core_topics_to_subscribe<E: EthSpec>(
 
     if fork_name.gloas_enabled() {
         topics.push(GossipKind::ExecutionPayload);
+        topics.push(GossipKind::PayloadAttestationMessage);
     }
 
     topics
@@ -120,6 +122,7 @@ pub fn is_fork_non_core_topic(topic: &GossipTopic, _fork_name: ForkName) -> bool
         | GossipKind::SignedContributionAndProof
         | GossipKind::BlsToExecutionChange
         | GossipKind::ExecutionPayload
+        | GossipKind::PayloadAttestationMessage
         | GossipKind::LightClientFinalityUpdate
         | GossipKind::LightClientOptimisticUpdate => false,
     }
@@ -180,6 +183,8 @@ pub enum GossipKind {
     BlsToExecutionChange,
     /// Topic for publishing execution payload envelopes.
     ExecutionPayload,
+    /// Topic for publishing payload attestation messages.
+    PayloadAttestationMessage,
     /// Topic for publishing finality updates for light clients.
     LightClientFinalityUpdate,
     /// Topic for publishing optimistic updates for light clients.
@@ -265,6 +270,7 @@ impl GossipTopic {
                 ATTESTER_SLASHING_TOPIC => GossipKind::AttesterSlashing,
                 BLS_TO_EXECUTION_CHANGE_TOPIC => GossipKind::BlsToExecutionChange,
                 EXECUTION_PAYLOAD_TOPIC => GossipKind::ExecutionPayload,
+                PAYLOAD_ATTESTATION_MESSAGE_TOPIC => GossipKind::PayloadAttestationMessage,
                 LIGHT_CLIENT_FINALITY_UPDATE => GossipKind::LightClientFinalityUpdate,
                 LIGHT_CLIENT_OPTIMISTIC_UPDATE => GossipKind::LightClientOptimisticUpdate,
                 topic => match subnet_topic_index(topic) {
@@ -331,6 +337,7 @@ impl std::fmt::Display for GossipTopic {
             }
             GossipKind::BlsToExecutionChange => BLS_TO_EXECUTION_CHANGE_TOPIC.into(),
             GossipKind::ExecutionPayload => EXECUTION_PAYLOAD_TOPIC.into(),
+            GossipKind::PayloadAttestationMessage => PAYLOAD_ATTESTATION_MESSAGE_TOPIC.into(),
             GossipKind::LightClientFinalityUpdate => LIGHT_CLIENT_FINALITY_UPDATE.into(),
             GossipKind::LightClientOptimisticUpdate => LIGHT_CLIENT_OPTIMISTIC_UPDATE.into(),
         };

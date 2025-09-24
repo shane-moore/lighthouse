@@ -9,11 +9,12 @@ use std::sync::Arc;
 use types::{
     AttesterSlashing, AttesterSlashingBase, AttesterSlashingElectra, BlobSidecar,
     DataColumnSidecar, DataColumnSubnetId, EthSpec, ForkContext, ForkVersionDecode,
-    LightClientFinalityUpdate, LightClientOptimisticUpdate, ProposerSlashing,
-    SignedAggregateAndProof, SignedAggregateAndProofBase, SignedAggregateAndProofElectra,
-    SignedBeaconBlock, SignedBlsToExecutionChange, SignedContributionAndProof,
-    SignedExecutionPayloadEnvelope, SignedExecutionPayloadEnvelopeGloas, SignedVoluntaryExit,
-    SingleAttestation, SubnetId, SyncCommitteeMessage, SyncSubnetId,
+    LightClientFinalityUpdate, LightClientOptimisticUpdate, PayloadAttestationMessage,
+    ProposerSlashing, SignedAggregateAndProof, SignedAggregateAndProofBase,
+    SignedAggregateAndProofElectra, SignedBeaconBlock, SignedBlsToExecutionChange,
+    SignedContributionAndProof, SignedExecutionPayloadEnvelope,
+    SignedExecutionPayloadEnvelopeGloas, SignedVoluntaryExit, SingleAttestation, SubnetId,
+    SyncCommitteeMessage, SyncSubnetId,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -42,6 +43,8 @@ pub enum PubsubMessage<E: EthSpec> {
     BlsToExecutionChange(Box<SignedBlsToExecutionChange>),
     /// Gossipsub message providing notification of a signed execution payload envelope.
     ExecutionPayload(Box<SignedExecutionPayloadEnvelope<E>>),
+    /// Gossipsub message providing notification of a payload attestation message.
+    PayloadAttestationMessage(Box<PayloadAttestationMessage>),
     /// Gossipsub message providing notification of a light client finality update.
     LightClientFinalityUpdate(Box<LightClientFinalityUpdate<E>>),
     /// Gossipsub message providing notification of a light client optimistic update.
@@ -146,6 +149,7 @@ impl<E: EthSpec> PubsubMessage<E> {
             PubsubMessage::SyncCommitteeMessage(data) => GossipKind::SyncCommitteeMessage(data.0),
             PubsubMessage::BlsToExecutionChange(_) => GossipKind::BlsToExecutionChange,
             PubsubMessage::ExecutionPayload(_) => GossipKind::ExecutionPayload,
+            PubsubMessage::PayloadAttestationMessage(_) => GossipKind::PayloadAttestationMessage,
             PubsubMessage::LightClientFinalityUpdate(_) => GossipKind::LightClientFinalityUpdate,
             PubsubMessage::LightClientOptimisticUpdate(_) => {
                 GossipKind::LightClientOptimisticUpdate
@@ -328,18 +332,17 @@ impl<E: EthSpec> PubsubMessage<E> {
                             .get_fork_from_context_bytes(gossip_topic.fork_digest)
                         {
                             Some(&fork_name) => {
-                                if fork_name.gloas_enabled() {
-                                    // TODO(EIP-7732): replace this with SignedExecutionPayloadEnvelope::from_ssz_bytes_for_fork once this branch is merged: https://github.com/shane-moore/lighthouse/tree/gloas-vc-publish-block
-                                    SignedExecutionPayloadEnvelope::Gloas(
-                                        SignedExecutionPayloadEnvelopeGloas::from_ssz_bytes(data)
-                                            .map_err(|e| format!("{:?}", e))?,
-                                    )
-                                } else {
+                                if !fork_name.gloas_enabled() {
                                     return Err(format!(
                                         "execution_payload topic not supported for fork {:?}",
                                         fork_name
                                     ));
                                 }
+                                // TODO(EIP-7732): replace this with SignedExecutionPayloadEnvelope::from_ssz_bytes_for_fork once this branch is merged: https://github.com/shane-moore/lighthouse/tree/gloas-vc-publish-block
+                                SignedExecutionPayloadEnvelope::Gloas(
+                                    SignedExecutionPayloadEnvelopeGloas::from_ssz_bytes(data)
+                                        .map_err(|e| format!("{:?}", e))?,
+                                )
                             }
                             None => {
                                 return Err(format!(
@@ -350,6 +353,31 @@ impl<E: EthSpec> PubsubMessage<E> {
                         };
                         Ok(PubsubMessage::ExecutionPayload(Box::new(
                             signed_execution_payload_envelope,
+                        )))
+                    }
+                    GossipKind::PayloadAttestationMessage => {
+                        let payload_attestation_message = match fork_context
+                            .get_fork_from_context_bytes(gossip_topic.fork_digest)
+                        {
+                            Some(&fork_name) => {
+                                if !fork_name.gloas_enabled() {
+                                    return Err(format!(
+                                        "payload_attestation_message topic not supported for fork {:?}",
+                                        fork_name
+                                    ));
+                                }
+                                PayloadAttestationMessage::from_ssz_bytes(data)
+                                    .map_err(|e| format!("{:?}", e))?
+                            }
+                            None => {
+                                return Err(format!(
+                                    "payload_attestation_message topic invalid for given fork digest {:?}",
+                                    gossip_topic.fork_digest
+                                ));
+                            }
+                        };
+                        Ok(PubsubMessage::PayloadAttestationMessage(Box::new(
+                            payload_attestation_message,
                         )))
                     }
                     GossipKind::LightClientFinalityUpdate => {
@@ -415,6 +443,7 @@ impl<E: EthSpec> PubsubMessage<E> {
             PubsubMessage::SyncCommitteeMessage(data) => data.1.as_ssz_bytes(),
             PubsubMessage::BlsToExecutionChange(data) => data.as_ssz_bytes(),
             PubsubMessage::ExecutionPayload(data) => data.as_ssz_bytes(),
+            PubsubMessage::PayloadAttestationMessage(data) => data.as_ssz_bytes(),
             PubsubMessage::LightClientFinalityUpdate(data) => data.as_ssz_bytes(),
             PubsubMessage::LightClientOptimisticUpdate(data) => data.as_ssz_bytes(),
         }
@@ -476,6 +505,13 @@ impl<E: EthSpec> std::fmt::Display for PubsubMessage<E> {
                     "Signed Execution Payload Envelope: slot: {}, builder_index: {}",
                     data.message().slot(),
                     data.message().builder_index()
+                )
+            }
+            PubsubMessage::PayloadAttestationMessage(data) => {
+                write!(
+                    f,
+                    "Payload Attestation Message: validator_index: {}, slot: {}",
+                    data.validator_index, data.data.slot
                 )
             }
             PubsubMessage::LightClientFinalityUpdate(_data) => {
