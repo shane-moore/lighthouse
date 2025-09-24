@@ -42,6 +42,8 @@ pub struct GossipCache {
     bls_to_execution_change: Option<Duration>,
     /// Timeout for execution payload envelopes.
     execution_payload: Option<Duration>,
+    /// Timeout for payload attestation messages.
+    payload_attestation_message: Option<Duration>,
     /// Timeout for light client finality updates.
     light_client_finality_update: Option<Duration>,
     /// Timeout for light client optimistic updates.
@@ -75,6 +77,8 @@ pub struct GossipCacheBuilder {
     bls_to_execution_change: Option<Duration>,
     /// Timeout for execution payload envelopes.
     execution_payload: Option<Duration>,
+    /// Timeout for payload attestation messages.
+    payload_attestation_message: Option<Duration>,
     /// Timeout for light client finality updates.
     light_client_finality_update: Option<Duration>,
     /// Timeout for light client optimistic updates.
@@ -170,6 +174,7 @@ impl GossipCacheBuilder {
             sync_committee_message,
             bls_to_execution_change,
             execution_payload,
+            payload_attestation_message,
             light_client_finality_update,
             light_client_optimistic_update,
         } = self;
@@ -188,6 +193,7 @@ impl GossipCacheBuilder {
             sync_committee_message: sync_committee_message.or(default_timeout),
             bls_to_execution_change: bls_to_execution_change.or(default_timeout),
             execution_payload: execution_payload.or(default_timeout),
+            payload_attestation_message: payload_attestation_message.or(default_timeout),
             light_client_finality_update: light_client_finality_update.or(default_timeout),
             light_client_optimistic_update: light_client_optimistic_update.or(default_timeout),
         }
@@ -216,6 +222,7 @@ impl GossipCache {
             GossipKind::SyncCommitteeMessage(_) => self.sync_committee_message,
             GossipKind::BlsToExecutionChange => self.bls_to_execution_change,
             GossipKind::ExecutionPayload => self.execution_payload,
+            GossipKind::PayloadAttestationMessage => self.payload_attestation_message,
             GossipKind::LightClientFinalityUpdate => self.light_client_finality_update,
             GossipKind::LightClientOptimisticUpdate => self.light_client_optimistic_update,
         };
