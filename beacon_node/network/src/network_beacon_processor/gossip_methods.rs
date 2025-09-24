@@ -2389,7 +2389,9 @@ impl<T: BeaconChainTypes> NetworkBeaconProcessor<T> {
             }
             AttnError::CommitteeIndexNonZero(index) => {
                 /*
-                 * The validator index is not set to zero after Electra.
+                 * The committee index is not set to zero when required by the fork rules.
+                 * - Electra: always must be zero
+                 * - Gloas: must be zero if attestation.slot == block.slot
                  *
                  * The peer has published an invalid consensus message.
                  */
@@ -2405,6 +2407,26 @@ impl<T: BeaconChainTypes> NetworkBeaconProcessor<T> {
                     peer_id,
                     PeerAction::LowToleranceError,
                     "attn_comm_index_non_zero",
+                );
+            }
+            AttnError::CommitteeIndexTooHigh(index) => {
+                /*
+                 * The committee index is too high for the gloas fork rules.
+                 *
+                 * The peer has published an invalid consensus message.
+                 */
+                debug!(
+                    %peer_id,
+                    block = ?beacon_block_root,
+                    ?attestation_type,
+                    committee_index = index,
+                    "Committee index too high"
+                );
+                self.propagate_validation_result(message_id, peer_id, MessageAcceptance::Reject);
+                self.gossip_penalize_peer(
+                    peer_id,
+                    PeerAction::LowToleranceError,
+                    "attn_comm_index_too_high",
                 );
             }
             AttnError::UnknownHeadBlock { beacon_block_root } => {
