@@ -39,8 +39,9 @@ use types::{
     Attestation, AttestationData, AttestationRef, AttesterSlashing, BlobSidecar, DataColumnSidecar,
     DataColumnSubnetId, EthSpec, Hash256, IndexedAttestation, LightClientFinalityUpdate,
     LightClientOptimisticUpdate, ProposerSlashing, SignedAggregateAndProof, SignedBeaconBlock,
-    SignedBlsToExecutionChange, SignedContributionAndProof, SignedVoluntaryExit, SingleAttestation,
-    Slot, SubnetId, SyncCommitteeMessage, SyncSubnetId, beacon_block::BlockImportSource,
+    SignedBlsToExecutionChange, SignedContributionAndProof, SignedExecutionPayloadEnvelope,
+    SignedVoluntaryExit, SingleAttestation, Slot, SubnetId, SyncCommitteeMessage, SyncSubnetId,
+    beacon_block::BlockImportSource,
 };
 
 use beacon_processor::work_reprocessing_queue::QueuedColumnReconstruction;
@@ -3214,5 +3215,18 @@ impl<T: BeaconChainTypes> NetworkBeaconProcessor<T> {
             write_file(block_path, &block.as_ssz_bytes());
             write_file(error_path, error.to_string().as_bytes());
         }
+    }
+
+    pub fn process_gossip_execution_payload(
+        self: &Arc<Self>,
+        message_id: MessageId,
+        peer_id: PeerId,
+        execution_payload: SignedExecutionPayloadEnvelope<T::EthSpec>,
+    ) {
+        // TODO(EIP-7732): Implement proper execution payload envelope gossip processing.
+        // This should integrate with the envelope_verification.rs module once it's implemented.
+
+        // For now, ignore all envelopes since verification is not implemented
+        self.propagate_validation_result(message_id, peer_id, MessageAcceptance::Ignore);
     }
 }

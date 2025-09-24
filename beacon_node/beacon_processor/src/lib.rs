@@ -130,6 +130,7 @@ pub struct BeaconProcessorQueueLengths {
     dcbroots_queue: usize,
     dcbrange_queue: usize,
     gossip_bls_to_execution_change_queue: usize,
+    gossip_execution_payload_queue: usize,
     lc_gossip_finality_update_queue: usize,
     lc_gossip_optimistic_update_queue: usize,
     lc_bootstrap_queue: usize,
@@ -196,6 +197,7 @@ impl BeaconProcessorQueueLengths {
             dcbroots_queue: 1024,
             dcbrange_queue: 1024,
             gossip_bls_to_execution_change_queue: 16384,
+            gossip_execution_payload_queue: 16384,
             lc_gossip_finality_update_queue: 1024,
             lc_gossip_optimistic_update_queue: 1024,
             lc_bootstrap_queue: 1024,
@@ -612,6 +614,7 @@ pub enum Work<E: EthSpec> {
     DataColumnsByRootsRequest(BlockingFn),
     DataColumnsByRangeRequest(BlockingFn),
     GossipBlsToExecutionChange(BlockingFn),
+    GossipExecutionPayload(BlockingFn),
     LightClientBootstrapRequest(BlockingFn),
     LightClientOptimisticUpdateRequest(BlockingFn),
     LightClientFinalityUpdateRequest(BlockingFn),
@@ -664,6 +667,7 @@ pub enum WorkType {
     DataColumnsByRootsRequest,
     DataColumnsByRangeRequest,
     GossipBlsToExecutionChange,
+    GossipExecutionPayload,
     LightClientBootstrapRequest,
     LightClientOptimisticUpdateRequest,
     LightClientFinalityUpdateRequest,
@@ -699,6 +703,7 @@ impl<E: EthSpec> Work<E> {
                 WorkType::GossipLightClientOptimisticUpdate
             }
             Work::GossipBlsToExecutionChange(_) => WorkType::GossipBlsToExecutionChange,
+            Work::GossipExecutionPayload(_) => WorkType::GossipExecutionPayload,
             Work::RpcBlock { .. } => WorkType::RpcBlock,
             Work::RpcBlobs { .. } => WorkType::RpcBlobs,
             Work::RpcCustodyColumn { .. } => WorkType::RpcCustodyColumn,
@@ -885,6 +890,8 @@ impl<E: EthSpec> BeaconProcessor<E> {
 
         let mut gossip_bls_to_execution_change_queue =
             FifoQueue::new(queue_lengths.gossip_bls_to_execution_change_queue);
+        let mut gossip_execution_payload_queue =
+            FifoQueue::new(queue_lengths.gossip_execution_payload_queue);
 
         // Using FIFO queues for light client updates to maintain sequence order.
         let mut lc_gossip_finality_update_queue =
@@ -1173,6 +1180,10 @@ impl<E: EthSpec> BeaconProcessor<E> {
                             // Convert any gossip attestations that need to be converted.
                             } else if let Some(item) = attestation_to_convert_queue.pop() {
                                 Some(item)
+                            // Check execution payload envelopes after attestations since they come later in the slot
+                            // TODO(EIP-7732): discuss with Mark where envelopes belong in terms of priority
+                            } else if let Some(item) = gossip_execution_payload_queue.pop() {
+                                Some(item)
                             // Check sync committee messages after attestations as their rewards are lesser
                             // and they don't influence fork choice.
                             } else if let Some(item) = sync_contribution_queue.pop() {
@@ -1384,6 +1395,9 @@ impl<E: EthSpec> BeaconProcessor<E> {
                             Work::GossipBlsToExecutionChange { .. } => {
                                 gossip_bls_to_execution_change_queue.push(work, work_id)
                             }
+                            Work::GossipExecutionPayload { .. } => {
+                                gossip_execution_payload_queue.push(work, work_id)
+                            }
                             Work::BlobsByRootsRequest { .. } => blbroots_queue.push(work, work_id),
                             Work::DataColumnsByRootsRequest { .. } => {
                                 dcbroots_queue.push(work, work_id)
@@ -1444,6 +1458,7 @@ impl<E: EthSpec> BeaconProcessor<E> {
                         WorkType::GossipBlsToExecutionChange => {
                             gossip_bls_to_execution_change_queue.len()
                         }
+                        WorkType::GossipExecutionPayload => gossip_execution_payload_queue.len(),
                         WorkType::LightClientBootstrapRequest => lc_bootstrap_queue.len(),
                         WorkType::LightClientOptimisticUpdateRequest => {
                             lc_rpc_optimistic_update_queue.len()
@@ -1624,6 +1639,7 @@ impl<E: EthSpec> BeaconProcessor<E> {
             | Work::GossipLightClientOptimisticUpdate(process_fn)
             | Work::Status(process_fn)
             | Work::GossipBlsToExecutionChange(process_fn)
+            | Work::GossipExecutionPayload(process_fn)
             | Work::LightClientBootstrapRequest(process_fn)
             | Work::LightClientOptimisticUpdateRequest(process_fn)
             | Work::LightClientFinalityUpdateRequest(process_fn)
