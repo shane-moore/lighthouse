@@ -48,6 +48,26 @@ pub struct SignedExecutionPayloadEnvelope<E: EthSpec> {
 }
 
 impl<E: EthSpec> SignedExecutionPayloadEnvelope<E> {
+    /// Create a new `SignedExecutionPayloadEnvelope` from an `ExecutionPayloadEnvelope` and `Signature`.
+    pub fn from_envelope(envelope: ExecutionPayloadEnvelope<E>, signature: Signature) -> Self {
+        match envelope {
+            ExecutionPayloadEnvelope::Gloas(message) => SignedExecutionPayloadEnvelope::Gloas(
+                signed_execution_payload_envelope::SignedExecutionPayloadEnvelopeGloas {
+                    message,
+                    signature,
+                },
+            ),
+            ExecutionPayloadEnvelope::NextFork(message) => {
+                SignedExecutionPayloadEnvelope::NextFork(
+                    signed_execution_payload_envelope::SignedExecutionPayloadEnvelopeNextFork {
+                        message,
+                        signature,
+                    },
+                )
+            }
+        }
+    }
+
     pub fn message(&self) -> ExecutionPayloadEnvelopeRef<'_, E> {
         match self {
             Self::Gloas(signed) => ExecutionPayloadEnvelopeRef::Gloas(&signed.message),
