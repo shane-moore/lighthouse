@@ -878,6 +878,7 @@ impl<T: BeaconChainTypes> GossipVerifiedBlock<T> {
 
         // Do not gossip blocks that claim to contain more blobs than the max allowed
         // at the given block epoch.
+        // Note that `blob_kzg_commitments` were removed from the body in gloas fork, so this check will no longer apply
         if let Ok(commitments) = block.message().body().blob_kzg_commitments() {
             let max_blobs_at_epoch = chain
                 .spec
@@ -1030,7 +1031,19 @@ impl<T: BeaconChainTypes> GossipVerifiedBlock<T> {
         }
 
         // Validate the block's execution_payload (if any).
+        //  Note that `execution_payload` was removed from the body in gloas fork, so this check will no longer apply
         validate_execution_payload_for_gossip(&parent_block, block.message(), chain)?;
+
+        // TODO(EIP-7732): from the spec: https://ethereum.github.io/consensus-specs/specs/gloas/p2p-interface/#beacon_block
+        // we will need to satisfy this condition:
+        // If execution_payload verification of block's execution payload parent by an execution node is complete:
+        // [REJECT] The block's execution payload parent (defined by bid.parent_block_hash) passes all validation.
+        // discussed the options on eth r&d: https://discord.com/channels/595666850260713488/874767108809031740/1420935382706425867
+        // the idea is that during envelope processing, if we get back an `INVALID` status from the EL, then we add the `block_hash` to a list and if the next block's bid's `parent_block_hash` is in the list, we ignore the block.  Something like this should be implemented as part of the envelope processing flow
+
+        // TODO(EIP-7732): Discuss with Mark if he agrees that the following condition is implicitly already satisfied by the fact that an invalid parent block won't be included in fork choice and therefore will have thrown an error earlier when trying to retrieve the parent block
+        // [REJECT] The block's parent (defined by block.parent_root) passes validation.
+        // similar argument was made here for bellatrix: https://github.com/sigp/lighthouse/issues/2984#issuecomment-1048653155
 
         // Beacon API block_gossip events
         if let Some(event_handler) = chain.event_handler.as_ref()
