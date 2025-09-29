@@ -18,6 +18,7 @@ pub enum MessageType {
     SyncCommitteeSelectionProof,
     SyncCommitteeContributionAndProof,
     ValidatorRegistration,
+    ExecutionPayloadEnvelope,
 }
 
 #[derive(Debug, PartialEq, Copy, Clone, Serialize)]
@@ -74,6 +75,7 @@ pub enum Web3SignerObject<'a, E: EthSpec, Payload: AbstractExecPayload<E>> {
     SyncAggregatorSelectionData(&'a SyncAggregatorSelectionData),
     ContributionAndProof(&'a ContributionAndProof<E>),
     ValidatorRegistration(&'a ValidatorRegistrationData),
+    ExecutionPayloadEnvelope(&'a ExecutionPayloadEnvelope<E>),
 }
 
 impl<'a, E: EthSpec, Payload: AbstractExecPayload<E>> Web3SignerObject<'a, E, Payload> {
@@ -139,6 +141,7 @@ impl<'a, E: EthSpec, Payload: AbstractExecPayload<E>> Web3SignerObject<'a, E, Pa
                 MessageType::SyncCommitteeContributionAndProof
             }
             Web3SignerObject::ValidatorRegistration(_) => MessageType::ValidatorRegistration,
+            Web3SignerObject::ExecutionPayloadEnvelope(_) => MessageType::ExecutionPayloadEnvelope,
         }
     }
 }

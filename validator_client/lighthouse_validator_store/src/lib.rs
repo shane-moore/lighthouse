@@ -18,12 +18,12 @@ use task_executor::TaskExecutor;
 use tracing::{error, info, warn};
 use types::{
     AbstractExecPayload, Address, AggregateAndProof, Attestation, BeaconBlock, BlindedPayload,
-    ChainSpec, ContributionAndProof, Domain, Epoch, EthSpec, Fork, Graffiti, Hash256,
-    PublicKeyBytes, SelectionProof, Signature, SignedAggregateAndProof, SignedBeaconBlock,
-    SignedContributionAndProof, SignedRoot, SignedValidatorRegistrationData, SignedVoluntaryExit,
-    Slot, SyncAggregatorSelectionData, SyncCommitteeContribution, SyncCommitteeMessage,
-    SyncSelectionProof, SyncSubnetId, ValidatorRegistrationData, VoluntaryExit,
-    graffiti::GraffitiString,
+    ChainSpec, ContributionAndProof, Domain, Epoch, EthSpec, ExecutionPayloadEnvelope, Fork,
+    Graffiti, Hash256, PublicKeyBytes, SelectionProof, Signature, SignedAggregateAndProof,
+    SignedBeaconBlock, SignedContributionAndProof, SignedExecutionPayloadEnvelope, SignedRoot,
+    SignedValidatorRegistrationData, SignedVoluntaryExit, Slot, SyncAggregatorSelectionData,
+    SyncCommitteeContribution, SyncCommitteeMessage, SyncSelectionProof, SyncSubnetId,
+    ValidatorRegistrationData, VoluntaryExit, graffiti::GraffitiString,
 };
 use validator_store::{
     DoppelgangerStatus, Error as ValidatorStoreError, ProposalData, SignedBlock, UnsignedBlock,
@@ -743,6 +743,45 @@ impl<T: SlotClock + 'static, E: EthSpec> ValidatorStore for LighthouseValidatorS
                 .await
                 .map(|block| SignedBlock::Blinded(Arc::new(block))),
         }
+    }
+
+    async fn sign_block_gloas(
+        &self,
+        validator_pubkey: PublicKeyBytes,
+        block: &BeaconBlock<E>,
+        current_slot: Slot,
+    ) -> Result<Arc<SignedBeaconBlock<E>>, Error> {
+        let beacon_block = block.clone();
+        self.sign_abstract_block(validator_pubkey, beacon_block, current_slot)
+            .await
+            .map(|signed_block| Arc::new(signed_block))
+    }
+
+    async fn sign_execution_payload_envelope(
+        &self,
+        validator_pubkey: PublicKeyBytes,
+        envelope: &ExecutionPayloadEnvelope<E>,
+        current_slot: Slot,
+    ) -> Result<SignedExecutionPayloadEnvelope<E>, Error> {
+        let signing_epoch = current_slot.epoch(E::slots_per_epoch());
+        let signing_context = self.signing_context(Domain::BeaconBuilder, signing_epoch);
+
+        let signing_method = self.doppelganger_checked_signing_method(validator_pubkey)?;
+
+        let signature = signing_method
+            .get_signature::<E, BlindedPayload<E>>(
+                SignableMessage::ExecutionPayloadEnvelope(envelope),
+                signing_context,
+                &self.spec,
+                &self.task_executor,
+            )
+            .await
+            .map_err(Error::SpecificError)?;
+
+        let signed_envelope =
+            SignedExecutionPayloadEnvelope::from_envelope(envelope.clone(), signature);
+
+        Ok(signed_envelope)
     }
 
     async fn sign_attestation(

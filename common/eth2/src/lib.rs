@@ -7,6 +7,8 @@
 //! Eventually it would be ideal to publish this crate on crates.io, however we have some local
 //! dependencies preventing this presently.
 
+use ssz::{Decode, Encode};
+
 #[cfg(feature = "lighthouse")]
 pub mod lighthouse;
 #[cfg(feature = "lighthouse")]
@@ -15,8 +17,9 @@ pub mod mixin;
 pub mod types;
 
 use self::mixin::{RequestAccept, ResponseOptional};
-use self::types::{Error as ResponseError, *};
+use self::types::{Error as ResponseError, ExecutionPayloadEnvelopeMetadata, *};
 use ::types::beacon_response::ExecutionOptimisticFinalizedBeaconResponse;
+use ::types::{ExecutionPayloadEnvelope, ExecutionPayloadEnvelopeGloas, ForkName};
 use derivative::Derivative;
 use futures::Stream;
 use futures_util::StreamExt;
@@ -31,7 +34,6 @@ pub use reqwest::{StatusCode, Url};
 use reqwest_eventsource::{Event, EventSource};
 pub use sensitive_url::{SensitiveError, SensitiveUrl};
 use serde::{Serialize, de::DeserializeOwned};
-use ssz::Encode;
 use std::fmt;
 use std::future::Future;
 use std::path::PathBuf;
@@ -40,6 +42,7 @@ use std::time::Duration;
 pub const V1: EndpointVersion = EndpointVersion(1);
 pub const V2: EndpointVersion = EndpointVersion(2);
 pub const V3: EndpointVersion = EndpointVersion(3);
+pub const V4: EndpointVersion = EndpointVersion(4);
 
 pub const CONSENSUS_VERSION_HEADER: &str = "Eth-Consensus-Version";
 pub const EXECUTION_PAYLOAD_BLINDED_HEADER: &str = "Eth-Execution-Payload-Blinded";
@@ -66,6 +69,9 @@ const HTTP_GET_BEACON_BLOCK_SSZ_TIMEOUT_QUOTIENT: u32 = 4;
 const HTTP_GET_DEBUG_BEACON_STATE_QUOTIENT: u32 = 4;
 const HTTP_GET_DEPOSIT_SNAPSHOT_QUOTIENT: u32 = 4;
 const HTTP_GET_VALIDATOR_BLOCK_TIMEOUT_QUOTIENT: u32 = 4;
+// TODO(EIP-7732): determine what the envelope timeout should be
+const HTTP_GET_EXECUTION_PAYLOAD_ENVELOPE_TIMEOUT_QUOTIENT: u32 = 4;
+const HTTP_POST_EXECUTION_PAYLOAD_ENVELOPE_TIMEOUT_QUOTIENT: u32 = 4;
 const HTTP_DEFAULT_TIMEOUT_QUOTIENT: u32 = 4;
 
 #[derive(Debug)]
@@ -163,6 +169,8 @@ pub struct Timeouts {
     pub get_debug_beacon_states: Duration,
     pub get_deposit_snapshot: Duration,
     pub get_validator_block: Duration,
+    pub get_execution_payload_envelope: Duration,
+    pub post_execution_payload_envelope: Duration,
     pub default: Duration,
 }
 
@@ -183,6 +191,8 @@ impl Timeouts {
             get_debug_beacon_states: timeout,
             get_deposit_snapshot: timeout,
             get_validator_block: timeout,
+            get_execution_payload_envelope: timeout,
+            post_execution_payload_envelope: timeout,
             default: timeout,
         }
     }
@@ -205,6 +215,10 @@ impl Timeouts {
             get_debug_beacon_states: base_timeout / HTTP_GET_DEBUG_BEACON_STATE_QUOTIENT,
             get_deposit_snapshot: base_timeout / HTTP_GET_DEPOSIT_SNAPSHOT_QUOTIENT,
             get_validator_block: base_timeout / HTTP_GET_VALIDATOR_BLOCK_TIMEOUT_QUOTIENT,
+            get_execution_payload_envelope: base_timeout
+                / HTTP_GET_EXECUTION_PAYLOAD_ENVELOPE_TIMEOUT_QUOTIENT,
+            post_execution_payload_envelope: base_timeout
+                / HTTP_POST_EXECUTION_PAYLOAD_ENVELOPE_TIMEOUT_QUOTIENT,
             default: base_timeout / HTTP_DEFAULT_TIMEOUT_QUOTIENT,
         }
     }
@@ -1273,6 +1287,8 @@ impl BeaconNodeHttpClient {
     }
 
     /// `POST v2/beacon/blocks`
+    /// TODO(EIP-7732): Modify beacon node response endpoint per
+    ///  https://github.com/ethereum/beacon-APIs/pull/552.
     pub async fn post_beacon_blocks_v2_ssz<E: EthSpec>(
         &self,
         block_contents: &PublishBlockRequest<E>,
@@ -2261,16 +2277,17 @@ impl BeaconNodeHttpClient {
         Ok(path)
     }
 
-    /// returns `GET v3/validator/blocks/{slot}` URL path
-    pub async fn get_validator_blocks_v3_path(
+    /// returns `GET v3/validator/blocks/{slot}` or `GET v4/validator/blocks/{slot}` URL path
+    pub async fn get_validator_blocks_v3_and_v4_path(
         &self,
+        version: EndpointVersion,
         slot: Slot,
         randao_reveal: &SignatureBytes,
         graffiti: Option<&Graffiti>,
         skip_randao_verification: SkipRandaoVerification,
-        builder_booster_factor: Option<u64>,
+        builder_boost_factor: Option<u64>,
     ) -> Result<Url, Error> {
-        let mut path = self.eth_path(V3)?;
+        let mut path = self.eth_path(version)?;
 
         path.path_segments_mut()
             .map_err(|()| Error::InvalidUrl(self.server.clone()))?
@@ -2291,12 +2308,32 @@ impl BeaconNodeHttpClient {
                 .append_pair("skip_randao_verification", "");
         }
 
-        if let Some(builder_booster_factor) = builder_booster_factor {
+        if let Some(builder_boost_factor) = builder_boost_factor {
             path.query_pairs_mut()
-                .append_pair("builder_boost_factor", &builder_booster_factor.to_string());
+                .append_pair("builder_boost_factor", &builder_boost_factor.to_string());
         }
 
         Ok(path)
+    }
+
+    /// returns `GET v3/validator/blocks/{slot}` URL path (convenience method)
+    pub async fn get_validator_blocks_v3_path(
+        &self,
+        slot: Slot,
+        randao_reveal: &SignatureBytes,
+        graffiti: Option<&Graffiti>,
+        skip_randao_verification: SkipRandaoVerification,
+        builder_boost_factor: Option<u64>,
+    ) -> Result<Url, Error> {
+        self.get_validator_blocks_v3_and_v4_path(
+            V3,
+            slot,
+            randao_reveal,
+            graffiti,
+            skip_randao_verification,
+            builder_boost_factor,
+        )
+        .await
     }
 
     /// `GET v3/validator/blocks/{slot}`
@@ -2305,14 +2342,14 @@ impl BeaconNodeHttpClient {
         slot: Slot,
         randao_reveal: &SignatureBytes,
         graffiti: Option<&Graffiti>,
-        builder_booster_factor: Option<u64>,
+        builder_boost_factor: Option<u64>,
     ) -> Result<(JsonProduceBlockV3Response<E>, ProduceBlockV3Metadata), Error> {
         self.get_validator_blocks_v3_modular(
             slot,
             randao_reveal,
             graffiti,
             SkipRandaoVerification::No,
-            builder_booster_factor,
+            builder_boost_factor,
         )
         .await
     }
@@ -2324,7 +2361,7 @@ impl BeaconNodeHttpClient {
         randao_reveal: &SignatureBytes,
         graffiti: Option<&Graffiti>,
         skip_randao_verification: SkipRandaoVerification,
-        builder_booster_factor: Option<u64>,
+        builder_boost_factor: Option<u64>,
     ) -> Result<(JsonProduceBlockV3Response<E>, ProduceBlockV3Metadata), Error> {
         let path = self
             .get_validator_blocks_v3_path(
@@ -2332,7 +2369,7 @@ impl BeaconNodeHttpClient {
                 randao_reveal,
                 graffiti,
                 skip_randao_verification,
-                builder_booster_factor,
+                builder_boost_factor,
             )
             .await?;
 
@@ -2374,14 +2411,14 @@ impl BeaconNodeHttpClient {
         slot: Slot,
         randao_reveal: &SignatureBytes,
         graffiti: Option<&Graffiti>,
-        builder_booster_factor: Option<u64>,
+        builder_boost_factor: Option<u64>,
     ) -> Result<(ProduceBlockV3Response<E>, ProduceBlockV3Metadata), Error> {
         self.get_validator_blocks_v3_modular_ssz::<E>(
             slot,
             randao_reveal,
             graffiti,
             SkipRandaoVerification::No,
-            builder_booster_factor,
+            builder_boost_factor,
         )
         .await
     }
@@ -2393,7 +2430,7 @@ impl BeaconNodeHttpClient {
         randao_reveal: &SignatureBytes,
         graffiti: Option<&Graffiti>,
         skip_randao_verification: SkipRandaoVerification,
-        builder_booster_factor: Option<u64>,
+        builder_boost_factor: Option<u64>,
     ) -> Result<(ProduceBlockV3Response<E>, ProduceBlockV3Metadata), Error> {
         let path = self
             .get_validator_blocks_v3_path(
@@ -2401,7 +2438,7 @@ impl BeaconNodeHttpClient {
                 randao_reveal,
                 graffiti,
                 skip_randao_verification,
-                builder_booster_factor,
+                builder_boost_factor,
             )
             .await?;
 
@@ -2578,6 +2615,288 @@ impl BeaconNodeHttpClient {
 
         self.get_bytes_opt_accept_header(path, Accept::Ssz, self.timeouts.get_validator_block)
             .await
+    }
+
+    /// `GET v1/validator/execution_payload_envelope/{slot}/{builder_index}`
+    /// TODO(EIP-7732): Build out beacon node response endpoint per
+    /// https://github.com/ethereum/beacon-APIs/pull/552
+    /// Only client side request is implemented so far.
+    pub async fn get_execution_payload_envelope<E: EthSpec>(
+        &self,
+        slot: Slot,
+        builder_index: u64,
+    ) -> Result<ForkVersionedResponse<ExecutionPayloadEnvelope<E>>, Error> {
+        let path = self
+            .get_execution_payload_envelope_path(slot, builder_index)
+            .await?;
+
+        self.get_with_timeout(path, self.timeouts.get_execution_payload_envelope)
+            .await
+    }
+
+    /// `GET v1/validator/execution_payload_envelope/{slot}/{builder_index}` in SSZ format
+    /// TODO(EIP-7732): Build out beacon node response endpoint per
+    /// https://github.com/ethereum/beacon-APIs/pull/552
+    /// Only client side request is implemented so far.
+    pub async fn get_execution_payload_envelope_ssz<E: EthSpec>(
+        &self,
+        slot: Slot,
+        builder_index: u64,
+    ) -> Result<ExecutionPayloadEnvelope<E>, Error> {
+        let path = self
+            .get_execution_payload_envelope_path(slot, builder_index)
+            .await?;
+
+        let opt_response = self
+            .get_response_with_response_headers(
+                path,
+                Accept::Ssz,
+                self.timeouts.get_execution_payload_envelope,
+                |response, headers| async move {
+                    let metadata = ExecutionPayloadEnvelopeMetadata::try_from(&headers)
+                        .map_err(Error::InvalidHeaders)?;
+                    let response_bytes = response.bytes().await?;
+
+                    let envelope = if metadata.consensus_version.gloas_enabled() {
+                        ExecutionPayloadEnvelope::Gloas(
+                            ExecutionPayloadEnvelopeGloas::from_ssz_bytes(&response_bytes)
+                                .map_err(Error::InvalidSsz)?,
+                        )
+                    } else {
+                        return Err(Error::InvalidHeaders(format!(
+                            "ExecutionPayloadEnvelope not supported for fork: {:?}",
+                            metadata.consensus_version
+                        )));
+                    };
+
+                    Ok(envelope)
+                },
+            )
+            .await?;
+
+        // This route should never 404 unless unimplemented, so treat that as an error.
+        opt_response.ok_or(Error::StatusCode(StatusCode::NOT_FOUND))
+    }
+
+    /// returns `GET v1/validator/execution_payload_envelope/{slot}/{builder_index}` URL path
+    pub async fn get_execution_payload_envelope_path(
+        &self,
+        slot: Slot,
+        builder_index: u64,
+    ) -> Result<Url, Error> {
+        let mut path = self.eth_path(V1)?;
+
+        path.path_segments_mut()
+            .map_err(|()| Error::InvalidUrl(self.server.clone()))?
+            .push("validator")
+            .push("execution_payload_envelope")
+            .push(&slot.to_string())
+            .push(&builder_index.to_string());
+
+        Ok(path)
+    }
+
+    /// `POST v1/beacon/execution_payload_envelope`
+    /// TODO(EIP-7732): Build out beacon node response endpoint per
+    /// https://github.com/ethereum/beacon-APIs/pull/552
+    /// Only client side request is implemented so far.
+    pub async fn post_execution_payload_envelope<E: EthSpec>(
+        &self,
+        envelope: &types::SignedExecutionPayloadEnvelope<E>,
+        fork_name: ForkName,
+    ) -> Result<(), Error> {
+        let mut path = self.eth_path(V1)?;
+
+        path.path_segments_mut()
+            .map_err(|()| Error::InvalidUrl(self.server.clone()))?
+            .push("beacon")
+            .push("execution_payload_envelope");
+
+        self.post_generic_with_consensus_version(
+            path,
+            envelope,
+            Some(self.timeouts.post_execution_payload_envelope),
+            fork_name,
+        )
+        .await?;
+
+        Ok(())
+    }
+
+    /// `POST v1/beacon/execution_payload_envelope` in SSZ format
+    /// TODO(EIP-7732): Build out beacon node response endpoint per
+    /// https://github.com/ethereum/beacon-APIs/pull/552
+    /// Only client side request is implemented so far.
+    pub async fn post_execution_payload_envelope_ssz<E: EthSpec>(
+        &self,
+        envelope: &types::SignedExecutionPayloadEnvelope<E>,
+        fork_name: ForkName,
+    ) -> Result<(), Error> {
+        let mut path = self.eth_path(V1)?;
+
+        path.path_segments_mut()
+            .map_err(|()| Error::InvalidUrl(self.server.clone()))?
+            .push("beacon")
+            .push("execution_payload_envelope");
+
+        self.post_generic_with_consensus_version_and_ssz_body(
+            path,
+            envelope.as_ssz_bytes(),
+            Some(self.timeouts.post_execution_payload_envelope),
+            fork_name,
+        )
+        .await?;
+
+        Ok(())
+    }
+
+    /// returns `GET v4/validator/blocks/{slot}` URL path
+    pub async fn get_validator_blocks_v4_path(
+        &self,
+        slot: Slot,
+        randao_reveal: &SignatureBytes,
+        graffiti: Option<&Graffiti>,
+        skip_randao_verification: SkipRandaoVerification,
+        builder_boost_factor: Option<u64>,
+    ) -> Result<Url, Error> {
+        self.get_validator_blocks_v3_and_v4_path(
+            V4,
+            slot,
+            randao_reveal,
+            graffiti,
+            skip_randao_verification,
+            builder_boost_factor,
+        )
+        .await
+    }
+
+    /// `GET v4/validator/blocks/{slot}` - Post-Gloas block production endpoint
+    /// This endpoint is specific to post-Gloas forks and only returns full blocks (no blinded concept)
+    /// TODO(EIP-7732): Build out beacon node response endpoint per
+    /// https://github.com/ethereum/beacon-APIs/pull/552
+    /// Only client side request is implemented so far.
+    pub async fn get_validator_blocks_v4<E: EthSpec>(
+        &self,
+        slot: Slot,
+        randao_reveal: &SignatureBytes,
+        graffiti: Option<&Graffiti>,
+        builder_boost_factor: Option<u64>,
+    ) -> Result<(JsonProduceBlockV4Response<E>, ProduceBlockV4Metadata), Error> {
+        self.get_validator_blocks_v4_modular(
+            slot,
+            randao_reveal,
+            graffiti,
+            SkipRandaoVerification::No,
+            builder_boost_factor,
+        )
+        .await
+    }
+
+    /// `GET v4/validator/blocks/{slot}` - Post-Gloas block production endpoint (modular version)
+    pub async fn get_validator_blocks_v4_modular<E: EthSpec>(
+        &self,
+        slot: Slot,
+        randao_reveal: &SignatureBytes,
+        graffiti: Option<&Graffiti>,
+        skip_randao_verification: SkipRandaoVerification,
+        builder_boost_factor: Option<u64>,
+    ) -> Result<(JsonProduceBlockV4Response<E>, ProduceBlockV4Metadata), Error> {
+        let path = self
+            .get_validator_blocks_v4_path(
+                slot,
+                randao_reveal,
+                graffiti,
+                skip_randao_verification,
+                builder_boost_factor,
+            )
+            .await?;
+
+        let opt_result = self
+            .get_response_with_response_headers(
+                path,
+                Accept::Json,
+                self.timeouts.get_validator_block,
+                |response, headers| async move {
+                    let header_metadata = ProduceBlockV4Metadata::try_from(&headers)
+                        .map_err(Error::InvalidHeaders)?;
+
+                    let block_response = response
+                        .json::<ForkVersionedResponse<ProduceBlockV4Response<E>, ProduceBlockV4Metadata>>()
+                        .await?;
+
+                    Ok((block_response, header_metadata))
+                },
+            )
+            .await?;
+
+        // This route should never 404 unless unimplemented, so treat that as an error.
+        opt_result.ok_or(Error::StatusCode(StatusCode::NOT_FOUND))
+    }
+
+    /// `GET v4/validator/blocks/{slot}` in SSZ format
+    /// TODO(EIP-7732): Build out beacon node response endpoint per
+    /// https://github.com/ethereum/beacon-APIs/pull/552
+    /// Only client side request is implemented so far.
+    pub async fn get_validator_blocks_v4_ssz<E: EthSpec>(
+        &self,
+        slot: Slot,
+        randao_reveal: &SignatureBytes,
+        graffiti: Option<&Graffiti>,
+        builder_boost_factor: Option<u64>,
+    ) -> Result<(ProduceBlockV4Response<E>, ProduceBlockV4Metadata), Error> {
+        self.get_validator_blocks_v4_modular_ssz::<E>(
+            slot,
+            randao_reveal,
+            graffiti,
+            SkipRandaoVerification::No,
+            builder_boost_factor,
+        )
+        .await
+    }
+
+    /// `GET v4/validator/blocks/{slot}` in SSZ format
+    pub async fn get_validator_blocks_v4_modular_ssz<E: EthSpec>(
+        &self,
+        slot: Slot,
+        randao_reveal: &SignatureBytes,
+        graffiti: Option<&Graffiti>,
+        skip_randao_verification: SkipRandaoVerification,
+        builder_boost_factor: Option<u64>,
+    ) -> Result<(ProduceBlockV4Response<E>, ProduceBlockV4Metadata), Error> {
+        let path = self
+            .get_validator_blocks_v4_path(
+                slot,
+                randao_reveal,
+                graffiti,
+                skip_randao_verification,
+                builder_boost_factor,
+            )
+            .await?;
+
+        let opt_response = self
+            .get_response_with_response_headers(
+                path,
+                Accept::Ssz,
+                self.timeouts.get_validator_block,
+                |response, headers| async move {
+                    let metadata = ProduceBlockV4Metadata::try_from(&headers)
+                        .map_err(Error::InvalidHeaders)?;
+                    let response_bytes = response.bytes().await?;
+
+                    // Parse SSZ bytes directly as BeaconBlock (ProduceBlockV4Response is just a type alias)
+                    let response = BeaconBlock::from_ssz_bytes_for_fork(
+                        &response_bytes,
+                        metadata.consensus_version,
+                    )
+                    .map_err(Error::InvalidSsz)?;
+
+                    Ok((response, metadata))
+                },
+            )
+            .await?;
+
+        // This route should never 404 unless unimplemented, so treat that as an error.
+        opt_response.ok_or(Error::StatusCode(StatusCode::NOT_FOUND))
     }
 
     /// `GET validator/attestation_data?slot,committee_index`
