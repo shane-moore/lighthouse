@@ -9,6 +9,10 @@ pub const BEACON_BLOCK: &str = "beacon_block";
 pub const BEACON_BLOCK_HTTP_GET: &str = "beacon_block_http_get";
 pub const BEACON_BLOCK_HTTP_POST: &str = "beacon_block_http_post";
 pub const BLINDED_BEACON_BLOCK_HTTP_POST: &str = "blinded_beacon_block_http_post";
+pub const EXECUTION_PAYLOAD_ENVELOPE_HTTP_GET: &str = "execution_payload_envelope_http_get";
+pub const EXECUTION_PAYLOAD_ENVELOPE_HTTP_POST: &str = "execution_payload_envelope_http_post";
+pub const EXECUTION_PAYLOAD_ENVELOPE_SIGN: &str = "execution_payload_envelope_sign";
+pub const EXECUTION_PAYLOAD_ENVELOPE: &str = "execution_payload_envelope";
 pub const ATTESTATIONS: &str = "attestations";
 pub const ATTESTATIONS_HTTP_GET: &str = "attestations_http_get";
 pub const ATTESTATIONS_HTTP_POST: &str = "attestations_http_post";
@@ -235,6 +239,12 @@ pub static BLOCK_SIGNING_TIMES: LazyLock<Result<Histogram>> = LazyLock::new(|| {
     try_create_histogram(
         "vc_block_signing_times_seconds",
         "Duration to obtain a signature for a block",
+    )
+});
+pub static ENVELOPE_SIGNING_TIMES: LazyLock<Result<Histogram>> = LazyLock::new(|| {
+    try_create_histogram(
+        "vc_envelope_signing_times_seconds",
+        "Duration to obtain a signature for an execution payload envelope",
     )
 });
 

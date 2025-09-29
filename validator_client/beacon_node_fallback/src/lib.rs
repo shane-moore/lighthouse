@@ -1004,6 +1004,7 @@ mod tests {
             spec.clone(),
         );
 
+        // TODO(EIP-7732): discuss whether we should replace this with a new `mock_post_beacon__blocks_v2_ssz` for post-gloas blocks since no blinded blocks anymore.
         mock_beacon_node_1.mock_post_beacon_blinded_blocks_v2_ssz(Duration::from_secs(0));
         mock_beacon_node_2.mock_post_beacon_blinded_blocks_v2_ssz(Duration::from_secs(0));
 

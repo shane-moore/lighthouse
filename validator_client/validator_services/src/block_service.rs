@@ -13,7 +13,7 @@ use std::time::Duration;
 use task_executor::TaskExecutor;
 use tokio::sync::mpsc;
 use tracing::{Instrument, debug, error, info, info_span, instrument, trace, warn};
-use types::{BlockType, ChainSpec, EthSpec, Graffiti, Slot};
+use types::{BeaconBlock, BlockType, ChainSpec, EthSpec, Graffiti, SignedBeaconBlock, Slot};
 use validator_store::{Error as ValidatorStoreError, SignedBlock, UnsignedBlock, ValidatorStore};
 
 #[derive(Debug)]
@@ -189,6 +189,41 @@ impl<T: SlotClock> ProposerFallback<T> {
             (Err(_), Some(proposer_nodes)) => proposer_nodes.first_success(func).await,
         }
     }
+
+    // Try `func` on `self.beacon_nodes` first. If that doesn't work, try `self.proposer_nodes`.
+    // Returns both the result and the beacon node client that provided it.
+    pub async fn request_proposers_last_with_source<F, O, Err, R>(
+        &self,
+        func: F,
+    ) -> Result<(O, BeaconNodeHttpClient), Errors<Err>>
+    where
+        F: Fn(BeaconNodeHttpClient) -> R + Clone,
+        R: Future<Output = Result<O, Err>>,
+        Err: Debug,
+    {
+        // Create a wrapper function that returns both the result and the source client
+        let wrapper_func = move |client: BeaconNodeHttpClient| {
+            let client_clone = client.clone();
+            let func_clone = func.clone();
+            async move {
+                func_clone(client)
+                    .await
+                    .map(|result| (result, client_clone))
+            }
+        };
+
+        // Try running wrapper_func on the non-proposer beacon nodes first
+        let beacon_nodes_result = self.beacon_nodes.first_success(wrapper_func.clone()).await;
+
+        match (beacon_nodes_result, &self.proposer_nodes) {
+            // The non-proposer node call succeeded, return the result and source.
+            (Ok(success), _) => Ok(success),
+            // The non-proposer node call failed, but we don't have any proposer nodes. Return an error.
+            (Err(e), None) => Err(e),
+            // The non-proposer node call failed, try the same call on the proposer nodes.
+            (Err(_), Some(proposer_nodes)) => proposer_nodes.first_success(wrapper_func).await,
+        }
+    }
 }
 
 /// Helper to minimise `Arc` usage.
@@ -300,6 +335,8 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> BlockService<S, T> {
             )
         }
 
+        let current_epoch = slot.epoch(S::E::slots_per_epoch());
+
         for validator_pubkey in proposers {
             let builder_boost_factor = self
                 .validator_store
@@ -307,9 +344,15 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> BlockService<S, T> {
             let service = self.clone();
             self.inner.executor.spawn(
                 async move {
-                    let result = service
-                        .get_validator_block_and_publish_block(slot, validator_pubkey, builder_boost_factor)
-                        .await;
+                    let result = if service.chain_spec.fork_name_at_epoch(current_epoch).gloas_enabled() {
+                        service
+                            .publish_block_gloas(slot, validator_pubkey, builder_boost_factor)
+                            .await
+                    } else {
+                        service
+                            .publish_block(slot, validator_pubkey, builder_boost_factor)
+                            .await
+                    };
 
                     match result {
                         Ok(_) => {}
@@ -401,12 +444,78 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> BlockService<S, T> {
         Ok(())
     }
 
-    #[instrument(
-        name = "block_proposal_duty_cycle",
-        skip_all,
-        fields(%slot, ?validator_pubkey)
-    )]
-    async fn get_validator_block_and_publish_block(
+    #[allow(clippy::too_many_arguments)]
+    async fn sign_and_publish_block_gloas(
+        &self,
+        proposer_fallback: ProposerFallback<T>,
+        slot: Slot,
+        graffiti: Option<Graffiti>,
+        validator_pubkey: &PublicKeyBytes,
+        unsigned_block: &BeaconBlock<S::E>,
+    ) -> Result<(), BlockError> {
+        let signing_timer = validator_metrics::start_timer(&validator_metrics::BLOCK_SIGNING_TIMES);
+
+        let res = self
+            .validator_store
+            .sign_block_gloas(*validator_pubkey, unsigned_block, slot)
+            .await;
+
+        let signed_block = match res {
+            Ok(signed_block) => signed_block,
+            Err(ValidatorStoreError::UnknownPubkey(pubkey)) => {
+                // A pubkey can be missing when a validator was recently removed
+                // via the API.
+                warn!(
+                    info = "a validator may have recently been removed from this VC",
+                    ?pubkey,
+                    ?slot,
+                    "Missing pubkey for block"
+                );
+                return Ok(());
+            }
+            Err(e) => {
+                return Err(BlockError::Recoverable(format!(
+                    "Unable to sign block: {e:?}"
+                )));
+            }
+        };
+
+        let signing_time_ms =
+            Duration::from_secs_f64(signing_timer.map_or(0.0, |t| t.stop_and_record())).as_millis();
+
+        info!(
+            slot = slot.as_u64(),
+            signing_time_ms = signing_time_ms,
+            "Publishing signed block"
+        );
+
+        // Publish block with first available beacon node.
+        //
+        // Try the proposer nodes first, since we've likely gone to efforts to
+        // protect them from DoS attacks and they're most likely to successfully
+        // publish a block.
+        proposer_fallback
+            .request_proposers_first(|beacon_node| async {
+                self.publish_signed_block_contents_gloas(&signed_block, beacon_node)
+                    .await
+            })
+            .await?;
+
+        let metadata = BlockMetadata::from(&signed_block);
+        info!(
+            block_type = ?metadata.block_type,
+            deposits = metadata.num_deposits,
+            attestations = metadata.num_attestations,
+            graffiti = ?graffiti.map(|g| g.as_utf8_lossy()),
+            slot = metadata.slot.as_u64(),
+            "Successfully published block"
+        );
+        Ok(())
+    }
+
+    // TODO(EIP-7732): Remove this sometime after gloas is live and make publish_block_gloas the default
+    // TODO(EIP-7732): Seems like block production testing is done through `simulator`. Discuss with team if that is sufficient for all this new gloas code.
+    async fn publish_block(
         self,
         slot: Slot,
         validator_pubkey: PublicKeyBytes,
@@ -549,6 +658,167 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> BlockService<S, T> {
         Ok(())
     }
 
+    async fn publish_block_gloas(
+        self,
+        slot: Slot,
+        validator_pubkey: PublicKeyBytes,
+        builder_boost_factor: Option<u64>,
+    ) -> Result<(), BlockError> {
+        let timer = validator_metrics::start_timer_vec(
+            &validator_metrics::BLOCK_SERVICE_TIMES,
+            &[validator_metrics::BEACON_BLOCK],
+        );
+
+        let randao_reveal = match self
+            .validator_store
+            .randao_reveal(validator_pubkey, slot.epoch(S::E::slots_per_epoch()))
+            .await
+        {
+            Ok(signature) => signature.into(),
+            Err(ValidatorStoreError::UnknownPubkey(pubkey)) => {
+                // A pubkey can be missing when a validator was recently removed
+                // via the API.
+                warn!(
+                    info = "a validator may have recently been removed from this VC",
+                    ?pubkey,
+                    ?slot,
+                    "Missing pubkey for block randao"
+                );
+                return Ok(());
+            }
+            Err(e) => {
+                return Err(BlockError::Recoverable(format!(
+                    "Unable to produce randao reveal signature: {:?}",
+                    e
+                )));
+            }
+        };
+
+        let graffiti = determine_graffiti(
+            &validator_pubkey,
+            self.graffiti_file.clone(),
+            self.validator_store.graffiti(&validator_pubkey),
+            self.graffiti,
+        );
+
+        let randao_reveal_ref = &randao_reveal;
+        let self_ref = &self;
+        let proposer_index = self.validator_store.validator_index(&validator_pubkey);
+        let proposer_fallback = ProposerFallback {
+            beacon_nodes: self.beacon_nodes.clone(),
+            proposer_nodes: self.proposer_nodes.clone(),
+        };
+
+        info!(slot = slot.as_u64(), "Requesting unsigned block");
+
+        // Request an SSZ block from all beacon nodes in order, returning on the first successful response.
+        // If all nodes fail, run a second pass falling back to JSON.
+        //
+        // IMPORTANT: We use request_proposers_last_with_source here to track which
+        // beacon node provided the block. This is critical for Gloas because the
+        // ExecutionPayloadEnvelope must come from the same beacon node that built
+        // the block (only that node will have the envelope cached).
+        let ssz_block_response = proposer_fallback
+            .request_proposers_last_with_source(|beacon_node| async move {
+                let _get_timer = validator_metrics::start_timer_vec(
+                    &validator_metrics::BLOCK_SERVICE_TIMES,
+                    &[validator_metrics::BEACON_BLOCK_HTTP_GET],
+                );
+                beacon_node
+                    .get_validator_blocks_v4_ssz::<S::E>(
+                        slot,
+                        randao_reveal_ref,
+                        graffiti.as_ref(),
+                        builder_boost_factor,
+                        self_ref.graffiti_policy,
+                    )
+                    .await
+            })
+            .await;
+
+        let (unsigned_block, block_source_node) = match ssz_block_response {
+            Ok(((ssz_block_response, _metadata), source_node)) => (ssz_block_response, source_node),
+            Err(e) => {
+                warn!(
+                    slot = slot.as_u64(),
+                    error = %e,
+                    "SSZ v4 block production failed, falling back to JSON"
+                );
+
+                let ((json_block_response, _metadata), source_node) = proposer_fallback
+                    .request_proposers_last_with_source(|beacon_node| async move {
+                        let _get_timer = validator_metrics::start_timer_vec(
+                            &validator_metrics::BLOCK_SERVICE_TIMES,
+                            &[validator_metrics::BEACON_BLOCK_HTTP_GET],
+                        );
+                        beacon_node
+                            .get_validator_blocks_v4::<S::E>(
+                                slot,
+                                randao_reveal_ref,
+                                graffiti.as_ref(),
+                                builder_boost_factor,
+                                self_ref.graffiti_policy,
+                            )
+                            .await
+                            .map_err(|e| {
+                                BlockError::Recoverable(format!(
+                                    "Error from beacon node when producing v4 block: {:?}",
+                                    e
+                                ))
+                            })
+                    })
+                    .await
+                    .map_err(BlockError::from)?;
+
+                (json_block_response.data, source_node)
+            }
+        };
+
+        let block_proposer = unsigned_block.proposer_index();
+
+        info!(slot = slot.as_u64(), "Received unsigned v4 block");
+        if proposer_index != Some(block_proposer) {
+            return Err(BlockError::Recoverable(
+                "Proposer index does not match block proposer. Beacon chain re-orged".to_string(),
+            ));
+        }
+
+        self_ref
+            .sign_and_publish_block_gloas(
+                proposer_fallback,
+                slot,
+                graffiti,
+                &validator_pubkey,
+                &unsigned_block,
+            )
+            .await?;
+
+        drop(timer);
+
+        // Check if this validator is also the builder for this block. If so, publish envelope
+        if let (Ok(bid), Some(validator_idx)) = (
+            unsigned_block.body().signed_execution_payload_bid(),
+            self_ref.validator_store.validator_index(&validator_pubkey),
+        ) {
+            if bid.message.builder_index == validator_idx {
+                info!(
+                    validator_index = validator_idx,
+                    builder_index = bid.message.builder_index,
+                    "Proposer is also the builder, will publish execution payload envelope after block"
+                );
+                self_ref
+                    .publish_execution_payload_envelope(
+                        slot,
+                        validator_pubkey,
+                        Some(block_source_node),
+                    )
+                    .await?;
+            }
+        }
+
+        Ok(())
+    }
+
     #[instrument(skip_all)]
     async fn publish_signed_block_contents(
         &self,
@@ -584,6 +854,207 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> BlockService<S, T> {
         }
         Ok::<_, BlockError>(())
     }
+
+    async fn publish_signed_block_contents_gloas(
+        &self,
+        signed_block: &Arc<SignedBeaconBlock<S::E>>,
+        beacon_node: BeaconNodeHttpClient,
+    ) -> Result<(), BlockError> {
+        let _post_timer = validator_metrics::start_timer_vec(
+            &validator_metrics::BLOCK_SERVICE_TIMES,
+            &[validator_metrics::BEACON_BLOCK_HTTP_POST],
+        );
+        let publish_request = eth2::types::PublishBlockRequest::Block(signed_block.clone());
+        beacon_node
+            .post_beacon_blocks_v2_ssz(&publish_request, None)
+            .await
+            .map(|_| ())
+            .or_else(|e| handle_block_post_error(e, signed_block.message().slot()))?;
+        Ok(())
+    }
+
+    async fn publish_signed_envelope_contents(
+        &self,
+        signed_envelope: &types::SignedExecutionPayloadEnvelope<S::E>,
+        slot: Slot,
+    ) -> Result<(), BlockError> {
+        let _post_timer = validator_metrics::start_timer_vec(
+            &validator_metrics::BLOCK_SERVICE_TIMES,
+            &[validator_metrics::EXECUTION_PAYLOAD_ENVELOPE_HTTP_POST],
+        );
+
+        let proposer_fallback = ProposerFallback {
+            beacon_nodes: self.beacon_nodes.clone(),
+            proposer_nodes: self.proposer_nodes.clone(),
+        };
+
+        // Publish envelope with first available beacon node.
+        // Try the proposer nodes first, since we've likely gone to efforts to
+        // protect them from DoS attacks and they're most likely to successfully
+        // publish an envelope.
+        let fork_name = self.chain_spec.fork_name_at_slot::<S::E>(slot);
+
+        proposer_fallback
+            .request_proposers_first(|beacon_node| async move {
+                beacon_node
+                    .post_execution_payload_envelope_ssz(signed_envelope, fork_name)
+                    .await
+                    .map_err(|e| {
+                        BlockError::Recoverable(format!(
+                            "Error from beacon node when publishing execution payload envelope: {:?}",
+                            e
+                        ))
+                    })
+            })
+            .await?;
+
+        Ok(())
+    }
+
+    async fn sign_execution_payload_envelope(
+        &self,
+        envelope: &types::ExecutionPayloadEnvelope<S::E>,
+        validator_pubkey: PublicKeyBytes,
+        slot: Slot,
+    ) -> Result<types::SignedExecutionPayloadEnvelope<S::E>, BlockError> {
+        let envelope_signing_timer =
+            validator_metrics::start_timer(&validator_metrics::ENVELOPE_SIGNING_TIMES);
+
+        info!(
+            slot = slot.as_u64(),
+            pub_key = %validator_pubkey,
+            "Signing execution payload envelope using ValidatorStore"
+        );
+
+        let signed_envelope = self
+            .validator_store
+            .sign_execution_payload_envelope(validator_pubkey, envelope, slot)
+            .await
+            .map_err(|e| {
+                BlockError::Irrecoverable(format!(
+                    "Failed to sign execution payload envelope: {:?}",
+                    e
+                ))
+            })?;
+
+        let envelope_signing_time_ms =
+            Duration::from_secs_f64(envelope_signing_timer.map_or(0.0, |t| t.stop_and_record()))
+                .as_millis();
+
+        info!(
+            slot = slot.as_u64(),
+            envelope_signing_time_ms = envelope_signing_time_ms,
+            pub_key = %validator_pubkey,
+            "Successfully signed execution payload envelope"
+        );
+
+        Ok(signed_envelope)
+    }
+
+    async fn get_execution_payload_envelope(
+        &self,
+        slot: Slot,
+        validator_pubkey: &PublicKeyBytes,
+        source_beacon_node: Option<BeaconNodeHttpClient>,
+    ) -> Result<types::ExecutionPayloadEnvelope<S::E>, BlockError> {
+        let _timer = validator_metrics::start_timer_vec(
+            &validator_metrics::BLOCK_SERVICE_TIMES,
+            &[validator_metrics::EXECUTION_PAYLOAD_ENVELOPE_HTTP_GET],
+        );
+
+        let builder_index = match self.validator_store.validator_index(validator_pubkey) {
+            Some(index) => index,
+            None => {
+                return Err(BlockError::Irrecoverable(format!(
+                    "Cannot find validator index {} for execution payload envelope",
+                    validator_pubkey
+                )));
+            }
+        };
+
+        // CRITICAL: We MUST use the same beacon node that provided the block.
+        // Only that beacon node will have the corresponding ExecutionPayloadEnvelope
+        // cached. If we don't have the source beacon node, this will fail.
+        let beacon_node = source_beacon_node.ok_or_else(|| {
+            BlockError::Irrecoverable(
+                "Cannot get execution payload envelope: no source beacon node available. \
+                 The ExecutionPayloadEnvelope must come from the same beacon node that built the block."
+                    .to_string(),
+            )
+        })?;
+
+        info!(
+            slot = slot.as_u64(),
+            pub_key = %validator_pubkey,
+            "Getting execution payload envelope from same beacon node that provided the block"
+        );
+
+        // Try SSZ first, fallback to JSON if it fails
+        match beacon_node
+            .get_execution_payload_envelope_ssz::<S::E>(slot, builder_index)
+            .await
+        {
+            Ok(envelope) => Ok(envelope),
+            Err(e) => {
+                warn!(
+                    slot = slot.as_u64(),
+                    error = %e,
+                    "Beacon node does not support SSZ for execution payload envelope, falling back to JSON"
+                );
+
+                let json_response = beacon_node
+                    .get_execution_payload_envelope::<S::E>(slot, builder_index)
+                    .await
+                    .map_err(|e| {
+                        BlockError::Recoverable(format!(
+                            "Error getting execution payload envelope from source beacon node: {:?}",
+                            e
+                        ))
+                    })?;
+
+                Ok(json_response.data)
+            }
+        }
+    }
+
+    async fn publish_execution_payload_envelope(
+        &self,
+        slot: Slot,
+        validator_pubkey: PublicKeyBytes,
+        source_beacon_node: Option<BeaconNodeHttpClient>,
+    ) -> Result<(), BlockError> {
+        let _timer = validator_metrics::start_timer_vec(
+            &validator_metrics::BLOCK_SERVICE_TIMES,
+            &[validator_metrics::EXECUTION_PAYLOAD_ENVELOPE],
+        );
+
+        info!(slot = slot.as_u64(), pub_key = %validator_pubkey, "Submitting payload envelope");
+
+        let envelope = self
+            .get_execution_payload_envelope(slot, &validator_pubkey, source_beacon_node)
+            .await?;
+
+        let signed_envelope = self
+            .sign_execution_payload_envelope(&envelope, validator_pubkey, slot)
+            .await?;
+
+        info!(
+            ?slot,
+            pub_key = %validator_pubkey,
+            "Successfully signed execution payload envelope"
+        );
+
+        self.publish_signed_envelope_contents(&signed_envelope, slot)
+            .await?;
+
+        info!(
+            ?slot,
+            pub_key = %validator_pubkey,
+            "Successfully published execution payload envelope"
+        );
+
+        Ok(())
+    }
 }
 
 /// Wrapper for values we want to log about a block we signed, for easy extraction from the possible
@@ -610,6 +1081,17 @@ impl<E: EthSpec> From<&SignedBlock<E>> for BlockMetadata {
                 num_deposits: block.message().body().deposits().len(),
                 num_attestations: block.message().body().attestations_len(),
             },
+        }
+    }
+}
+
+impl<E: EthSpec> From<&Arc<SignedBeaconBlock<E>>> for BlockMetadata {
+    fn from(block: &Arc<SignedBeaconBlock<E>>) -> Self {
+        Self {
+            block_type: BlockType::Full,
+            slot: block.message().slot(),
+            num_deposits: block.message().body().deposits().len(),
+            num_attestations: block.message().body().attestations_len(),
         }
     }
 }

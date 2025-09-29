@@ -1742,6 +1742,41 @@ pub struct ProduceBlockV3Metadata {
     pub consensus_block_value: Uint256,
 }
 
+/// Metadata about a `ExecutionPayloadEnvelope` response which is returned in the headers.
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ExecutionPayloadEnvelopeMetadata {
+    // The consensus version is serialized & deserialized by `ForkVersionedResponse`.
+    #[serde(
+        skip_serializing,
+        skip_deserializing,
+        default = "dummy_consensus_version"
+    )]
+    pub consensus_version: ForkName,
+}
+
+/// Response from the `/eth/v4/validator/blocks/{slot}` endpoint.
+///
+/// V4 is specific to post-Gloas forks and always returns a BeaconBlock directly.
+/// No blinded/unblinded concept exists in Gloas.
+pub type ProduceBlockV4Response<E> = BeaconBlock<E>;
+
+pub type JsonProduceBlockV4Response<E> =
+    ForkVersionedResponse<ProduceBlockV4Response<E>, ProduceBlockV4Metadata>;
+
+/// Metadata about a `ProduceBlockV4Response` which is returned in the body & headers.
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ProduceBlockV4Metadata {
+    // The consensus version is serialized & deserialized by `ForkVersionedResponse`.
+    #[serde(
+        skip_serializing,
+        skip_deserializing,
+        default = "dummy_consensus_version"
+    )]
+    pub consensus_version: ForkName,
+    #[serde(with = "serde_utils::u256_dec")]
+    pub consensus_block_value: Uint256,
+}
+
 impl<E: EthSpec> FullBlockContents<E> {
     pub fn new(block: BeaconBlock<E>, blob_data: Option<(KzgProofs<E>, BlobsList<E>)>) -> Self {
         match blob_data {
@@ -1893,6 +1928,40 @@ impl TryFrom<&HeaderMap> for ProduceBlockV3Metadata {
             consensus_version,
             execution_payload_blinded,
             execution_payload_value,
+            consensus_block_value,
+        })
+    }
+}
+
+impl TryFrom<&HeaderMap> for ExecutionPayloadEnvelopeMetadata {
+    type Error = String;
+
+    fn try_from(headers: &HeaderMap) -> Result<Self, Self::Error> {
+        let consensus_version = parse_required_header(headers, CONSENSUS_VERSION_HEADER, |s| {
+            s.parse::<ForkName>()
+                .map_err(|e| format!("invalid {CONSENSUS_VERSION_HEADER}: {e:?}"))
+        })?;
+
+        Ok(ExecutionPayloadEnvelopeMetadata { consensus_version })
+    }
+}
+
+impl TryFrom<&HeaderMap> for ProduceBlockV4Metadata {
+    type Error = String;
+
+    fn try_from(headers: &HeaderMap) -> Result<Self, Self::Error> {
+        let consensus_version = parse_required_header(headers, CONSENSUS_VERSION_HEADER, |s| {
+            s.parse::<ForkName>()
+                .map_err(|e| format!("invalid {CONSENSUS_VERSION_HEADER}: {e:?}"))
+        })?;
+        let consensus_block_value =
+            parse_required_header(headers, CONSENSUS_BLOCK_VALUE_HEADER, |s| {
+                Uint256::from_str_radix(s, 10)
+                    .map_err(|e| format!("invalid {CONSENSUS_BLOCK_VALUE_HEADER}: {e:?}"))
+            })?;
+
+        Ok(ProduceBlockV4Metadata {
+            consensus_version,
             consensus_block_value,
         })
     }
