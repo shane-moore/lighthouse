@@ -5,6 +5,7 @@ use std::sync::Arc;
 use types::{
     BlobSidecar, DataColumnSidecar, Epoch, EthSpec, LightClientBootstrap,
     LightClientFinalityUpdate, LightClientOptimisticUpdate, LightClientUpdate, SignedBeaconBlock,
+    SignedExecutionPayloadEnvelope,
 };
 
 pub type Id = u32;
@@ -30,6 +31,8 @@ pub enum SyncRequestId {
     BlobsByRange(BlobsByRangeRequestId),
     /// Data columns by range request
     DataColumnsByRange(DataColumnsByRangeRequestId),
+    /// Execution payload envelopes by range request
+    ExecutionPayloadEnvelopesByRange(ExecutionPayloadEnvelopesByRangeRequestId),
 }
 
 /// Request ID for data_columns_by_root requests. Block lookups do not issue this request directly.
@@ -67,6 +70,14 @@ pub struct DataColumnsByRangeRequestId {
     /// This is useful to penalize the peer at a later point if it returned data columns that
     /// did not match with the verified block.
     pub peer: PeerId,
+}
+
+#[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
+pub struct ExecutionPayloadEnvelopesByRangeRequestId {
+    /// Id to identify this attempt at an execution_payload_envelopes_by_range request
+    pub id: Id,
+    /// The Id of the overall By Range request for block components.
+    pub parent_request_id: ComponentsByRangeRequestId,
 }
 
 /// Block components by range request for range sync. Includes an ID for downstream consumers to
@@ -140,6 +151,8 @@ pub enum Response<E: EthSpec> {
     BlobsByRoot(Option<Arc<BlobSidecar<E>>>),
     /// A response to a get DATA_COLUMN_SIDECARS_BY_ROOT request.
     DataColumnsByRoot(Option<Arc<DataColumnSidecar<E>>>),
+    /// A response to a ExecutionPayloadEnvelopesByRange request.
+    ExecutionPayloadEnvelopesByRange(Option<Arc<SignedExecutionPayloadEnvelope<E>>>),
     /// A response to a LightClientUpdate request.
     LightClientBootstrap(Arc<LightClientBootstrap<E>>),
     /// A response to a LightClientOptimisticUpdate request.
@@ -177,6 +190,14 @@ impl<E: EthSpec> std::convert::From<Response<E>> for RpcResponse<E> {
                 Some(d) => RpcResponse::Success(RpcSuccessResponse::DataColumnsByRange(d)),
                 None => RpcResponse::StreamTermination(ResponseTermination::DataColumnsByRange),
             },
+            Response::ExecutionPayloadEnvelopesByRange(r) => match r {
+                Some(envelope) => RpcResponse::Success(
+                    RpcSuccessResponse::ExecutionPayloadEnvelopesByRange(envelope),
+                ),
+                None => RpcResponse::StreamTermination(
+                    ResponseTermination::ExecutionPayloadEnvelopesByRange,
+                ),
+            },
             Response::Status(s) => RpcResponse::Success(RpcSuccessResponse::Status(s)),
             Response::LightClientBootstrap(b) => {
                 RpcResponse::Success(RpcSuccessResponse::LightClientBootstrap(b))
@@ -213,6 +234,12 @@ macro_rules! impl_display {
 impl_display!(BlocksByRangeRequestId, "{}/{}", id, parent_request_id);
 impl_display!(BlobsByRangeRequestId, "{}/{}", id, parent_request_id);
 impl_display!(DataColumnsByRangeRequestId, "{}/{}", id, parent_request_id);
+impl_display!(
+    ExecutionPayloadEnvelopesByRangeRequestId,
+    "{}/{}",
+    id,
+    parent_request_id
+);
 impl_display!(ComponentsByRangeRequestId, "{}/{}", id, requester);
 impl_display!(DataColumnsByRootRequestId, "{}/{}", id, requester);
 impl_display!(SingleLookupReqId, "{}/Lookup/{}", req_id, lookup_id);
