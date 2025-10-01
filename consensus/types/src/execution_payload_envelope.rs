@@ -15,6 +15,7 @@ use tree_hash_derive::TreeHash;
     variants(Gloas, NextFork),
     variant_attributes(
         derive(
+            Default,
             Debug,
             Clone,
             Serialize,
@@ -98,6 +99,115 @@ impl<'de, E: EthSpec> ContextDeserialize<'de, ForkName> for ExecutionPayloadEnve
                 "ExecutionPayloadEnvelope does not support fork {context:?}"
             ))),
         }
+    }
+}
+
+/// Trait for creating empty execution payload envelopes.
+pub trait EmptyEnvelope {
+    /// Returns an empty envelope.
+    fn empty(spec: &ChainSpec) -> Self;
+}
+
+/// Trait for creating full-sized execution payload envelopes.
+pub trait FullEnvelope {
+    /// Returns an envelope with maximum-sized variable fields.
+    fn full(spec: &ChainSpec) -> Self;
+}
+
+impl<E: EthSpec> EmptyEnvelope for ExecutionPayloadEnvelopeGloas<E> {
+    /// Returns an empty Gloas execution payload envelope.
+    fn empty(spec: &ChainSpec) -> Self {
+        ExecutionPayloadEnvelopeGloas {
+            payload: ExecutionPayloadGloas::<E>::default(),
+            execution_requests: ExecutionRequests::<E>::default(),
+            builder_index: 0,
+            beacon_block_root: Hash256::zero(),
+            slot: spec
+                .gloas_fork_epoch
+                .expect("gloas enabled")
+                .start_slot(E::slots_per_epoch()),
+            blob_kzg_commitments: VariableList::empty(),
+            state_root: Hash256::zero(),
+        }
+    }
+}
+
+impl<E: EthSpec> FullEnvelope for ExecutionPayloadEnvelopeGloas<E> {
+    /// Returns a Gloas execution payload envelope with maximum-sized variable fields.
+    fn full(spec: &ChainSpec) -> Self {
+        let deposit_request = DepositRequest {
+            pubkey: PublicKeyBytes::empty(),
+            withdrawal_credentials: Hash256::zero(),
+            amount: 0,
+            signature: SignatureBytes::empty(),
+            index: 0,
+        };
+
+        let withdrawal_request = WithdrawalRequest {
+            source_address: Address::zero(),
+            validator_pubkey: PublicKeyBytes::empty(),
+            amount: 0,
+        };
+
+        let consolidation_request = ConsolidationRequest {
+            source_address: Address::zero(),
+            source_pubkey: PublicKeyBytes::empty(),
+            target_pubkey: PublicKeyBytes::empty(),
+        };
+
+        let kzg_commitment = KzgCommitment::empty_for_testing();
+
+        // Fill variable lists to maximum capacity
+        let mut deposits = VariableList::empty();
+        for _ in 0..E::MaxDepositRequestsPerPayload::to_usize() {
+            deposits.push(deposit_request.clone()).unwrap();
+        }
+
+        let mut withdrawals = VariableList::empty();
+        for _ in 0..E::MaxWithdrawalRequestsPerPayload::to_usize() {
+            withdrawals.push(withdrawal_request.clone()).unwrap();
+        }
+
+        let mut consolidations = VariableList::empty();
+        for _ in 0..E::MaxConsolidationRequestsPerPayload::to_usize() {
+            consolidations.push(consolidation_request.clone()).unwrap();
+        }
+
+        let mut blob_kzg_commitments = VariableList::empty();
+        for _ in 0..E::MaxBlobCommitmentsPerBlock::to_usize() {
+            blob_kzg_commitments.push(kzg_commitment.clone()).unwrap();
+        }
+
+        ExecutionPayloadEnvelopeGloas {
+            payload: ExecutionPayloadGloas::<E>::default(), // Keep payload as default - we add max payload size separately
+            execution_requests: ExecutionRequests {
+                deposits,
+                withdrawals,
+                consolidations,
+            },
+            builder_index: 0,
+            beacon_block_root: Hash256::zero(),
+            slot: spec
+                .gloas_fork_epoch
+                .expect("gloas enabled")
+                .start_slot(E::slots_per_epoch()),
+            blob_kzg_commitments,
+            state_root: Hash256::zero(),
+        }
+    }
+}
+
+impl<E: EthSpec> ExecutionPayloadEnvelope<E> {
+    /// Returns an empty envelope
+    pub fn empty(spec: &ChainSpec) -> Self {
+        // For now, only Gloas is supported
+        ExecutionPayloadEnvelope::Gloas(ExecutionPayloadEnvelopeGloas::empty(spec))
+    }
+
+    /// Returns an envelope with maximum-sized variable fields
+    pub fn full(spec: &ChainSpec) -> Self {
+        // For now, only Gloas is supported
+        ExecutionPayloadEnvelope::Gloas(ExecutionPayloadEnvelopeGloas::full(spec))
     }
 }
 

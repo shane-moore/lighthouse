@@ -97,6 +97,7 @@ pub struct RateLimiterConfig {
     pub(super) light_client_optimistic_update_quota: Quota,
     pub(super) light_client_finality_update_quota: Quota,
     pub(super) light_client_updates_by_range_quota: Quota,
+    pub(super) execution_payload_envelopes_by_range_quota: Quota,
 }
 
 impl RateLimiterConfig {
@@ -126,6 +127,10 @@ impl RateLimiterConfig {
     pub const DEFAULT_LIGHT_CLIENT_OPTIMISTIC_UPDATE_QUOTA: Quota = Quota::one_every(10);
     pub const DEFAULT_LIGHT_CLIENT_FINALITY_UPDATE_QUOTA: Quota = Quota::one_every(10);
     pub const DEFAULT_LIGHT_CLIENT_UPDATES_BY_RANGE_QUOTA: Quota = Quota::one_every(10);
+    // Similar quota as blocks by range since execution payload envelopes are similar in size
+    // TODO(EIP-7732): see if team supports this config
+    pub const DEFAULT_EXECUTION_PAYLOAD_ENVELOPES_BY_RANGE_QUOTA: Quota =
+        Quota::n_every(NonZeroU64::new(128).unwrap(), 10);
 }
 
 impl Default for RateLimiterConfig {
@@ -146,6 +151,8 @@ impl Default for RateLimiterConfig {
                 Self::DEFAULT_LIGHT_CLIENT_OPTIMISTIC_UPDATE_QUOTA,
             light_client_finality_update_quota: Self::DEFAULT_LIGHT_CLIENT_FINALITY_UPDATE_QUOTA,
             light_client_updates_by_range_quota: Self::DEFAULT_LIGHT_CLIENT_UPDATES_BY_RANGE_QUOTA,
+            execution_payload_envelopes_by_range_quota:
+                Self::DEFAULT_EXECUTION_PAYLOAD_ENVELOPES_BY_RANGE_QUOTA,
         }
     }
 }
@@ -205,6 +212,7 @@ impl FromStr for RateLimiterConfig {
         let mut light_client_optimistic_update_quota = None;
         let mut light_client_finality_update_quota = None;
         let mut light_client_updates_by_range_quota = None;
+        let mut execution_payload_envelopes_by_range_quota = None;
 
         for proto_def in s.split(';') {
             let ProtocolQuota { protocol, quota } = proto_def.parse()?;
@@ -239,6 +247,10 @@ impl FromStr for RateLimiterConfig {
                     light_client_updates_by_range_quota =
                         light_client_updates_by_range_quota.or(quota)
                 }
+                Protocol::ExecutionPayloadEnvelopesByRange => {
+                    execution_payload_envelopes_by_range_quota =
+                        execution_payload_envelopes_by_range_quota.or(quota)
+                }
             }
         }
         Ok(RateLimiterConfig {
@@ -265,6 +277,8 @@ impl FromStr for RateLimiterConfig {
                 .unwrap_or(Self::DEFAULT_LIGHT_CLIENT_FINALITY_UPDATE_QUOTA),
             light_client_updates_by_range_quota: light_client_updates_by_range_quota
                 .unwrap_or(Self::DEFAULT_LIGHT_CLIENT_UPDATES_BY_RANGE_QUOTA),
+            execution_payload_envelopes_by_range_quota: execution_payload_envelopes_by_range_quota
+                .unwrap_or(Self::DEFAULT_EXECUTION_PAYLOAD_ENVELOPES_BY_RANGE_QUOTA),
         })
     }
 }

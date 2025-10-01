@@ -3,6 +3,7 @@ use crate::*;
 use derivative::Derivative;
 use serde::de::{Deserializer, Error as _};
 use serde::{Deserialize, Serialize};
+use ssz::{Decode, Encode};
 use ssz_derive::{Decode, Encode};
 use superstruct::superstruct;
 use test_random_derive::TestRandom;
@@ -73,6 +74,44 @@ impl<E: EthSpec> SignedExecutionPayloadEnvelope<E> {
             Self::Gloas(signed) => ExecutionPayloadEnvelopeRef::Gloas(&signed.message),
             Self::NextFork(signed) => ExecutionPayloadEnvelopeRef::NextFork(&signed.message),
         }
+    }
+
+    /// Custom SSZ decoder that takes a `ForkName` as context.
+    pub fn from_ssz_bytes_for_fork(
+        bytes: &[u8],
+        fork_name: ForkName,
+    ) -> Result<Self, ssz::DecodeError> {
+        match fork_name {
+            ForkName::Gloas => SignedExecutionPayloadEnvelopeGloas::from_ssz_bytes(bytes)
+                .map(SignedExecutionPayloadEnvelope::Gloas),
+            _ => Err(ssz::DecodeError::BytesInvalid(format!(
+                "SignedExecutionPayloadEnvelope does not support fork {fork_name:?}"
+            ))),
+        }
+    }
+
+    /// Returns the maximum theoretical size of a SignedExecutionPayloadEnvelope.
+    /// This calculates the size by taking a full signed envelope with default payload,
+    /// then adding the maximum execution payload size, which has a max size ~16 GiB for future proofing.
+    pub fn max_size(spec: &ChainSpec) -> usize {
+        // Create a full envelope with maximum-sized variable fields but default payload
+        let full_envelope = ExecutionPayloadEnvelope::<E>::full(spec);
+
+        let signed_envelope = Self::from_envelope(full_envelope, Signature::empty());
+
+        // Get size of signed envelope with default payload
+        let signed_envelope_with_default_payload_size = signed_envelope.as_ssz_bytes().len();
+
+        let default_payload_size = signed_envelope
+            .message()
+            .payload()
+            .clone_from_ref()
+            .as_ssz_bytes()
+            .len();
+
+        // Calculate max size: signed envelope - default payload + max payload
+        signed_envelope_with_default_payload_size - default_payload_size
+            + ExecutionPayload::<E>::max_execution_payload_bellatrix_size()
     }
 }
 

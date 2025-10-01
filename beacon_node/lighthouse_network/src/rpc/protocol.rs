@@ -18,10 +18,11 @@ use tokio_util::{
 };
 use types::{
     BeaconBlock, BeaconBlockAltair, BeaconBlockBase, BlobSidecar, ChainSpec, DataColumnSidecar,
-    EmptyBlock, Epoch, EthSpec, EthSpecId, ForkContext, ForkName, LightClientBootstrap,
-    LightClientBootstrapAltair, LightClientFinalityUpdate, LightClientFinalityUpdateAltair,
-    LightClientOptimisticUpdate, LightClientOptimisticUpdateAltair, LightClientUpdate,
-    MainnetEthSpec, MinimalEthSpec, Signature, SignedBeaconBlock,
+    EmptyBlock, Epoch, EthSpec, EthSpecId, ExecutionPayloadEnvelope, ForkContext, ForkName,
+    LightClientBootstrap, LightClientBootstrapAltair, LightClientFinalityUpdate,
+    LightClientFinalityUpdateAltair, LightClientOptimisticUpdate,
+    LightClientOptimisticUpdateAltair, LightClientUpdate, MainnetEthSpec, MinimalEthSpec,
+    Signature, SignedBeaconBlock, SignedExecutionPayloadEnvelope,
 };
 
 // Note: Hardcoding the `EthSpec` type for `SignedBeaconBlock` as min/max values is
@@ -63,6 +64,21 @@ pub static SIGNED_BEACON_BLOCK_BELLATRIX_MAX: LazyLock<usize> =
     *SIGNED_BEACON_BLOCK_ALTAIR_MAX
     + types::ExecutionPayload::<MainnetEthSpec>::max_execution_payload_bellatrix_size() // adding max size of execution payload (~16gb)
     + ssz::BYTES_PER_LENGTH_OFFSET); // Adding the additional ssz offset for the `ExecutionPayload` field
+
+// Note that the `SignedExecutionPayloadEnvelope` contains an `ExecutionPayload` field with a max size of ~16 GiB.
+// However, we further bound the max size we receive over the network with `max_payload_size`.
+pub static SIGNED_EXECUTION_PAYLOAD_ENVELOPE_GLOAS_MAX: LazyLock<usize> = LazyLock::new(|| {
+    SignedExecutionPayloadEnvelope::<MainnetEthSpec>::max_size(&MainnetEthSpec::default_spec())
+});
+
+pub static SIGNED_EXECUTION_PAYLOAD_ENVELOPE_GLOAS_MIN: LazyLock<usize> = LazyLock::new(|| {
+    SignedExecutionPayloadEnvelope::from_envelope(
+        ExecutionPayloadEnvelope::<MainnetEthSpec>::empty(&MainnetEthSpec::default_spec()),
+        Signature::empty(),
+    )
+    .as_ssz_bytes()
+    .len()
+});
 
 pub static BLOB_SIDECAR_SIZE: LazyLock<usize> =
     LazyLock::new(BlobSidecar::<MainnetEthSpec>::max_size);
@@ -248,6 +264,9 @@ pub enum Protocol {
     /// The `DataColumnSidecarsByRange` protocol name.
     #[strum(serialize = "data_column_sidecars_by_range")]
     DataColumnsByRange,
+    /// The `ExecutionPayloadEnvelopesByRange` protocol name.
+    #[strum(serialize = "execution_payload_envelopes_by_range")]
+    ExecutionPayloadEnvelopesByRange,
     /// The `Ping` protocol name.
     Ping,
     /// The `MetaData` protocol name.
@@ -278,6 +297,9 @@ impl Protocol {
             Protocol::BlobsByRoot => Some(ResponseTermination::BlobsByRoot),
             Protocol::DataColumnsByRoot => Some(ResponseTermination::DataColumnsByRoot),
             Protocol::DataColumnsByRange => Some(ResponseTermination::DataColumnsByRange),
+            Protocol::ExecutionPayloadEnvelopesByRange => {
+                Some(ResponseTermination::ExecutionPayloadEnvelopesByRange)
+            }
             Protocol::Ping => None,
             Protocol::MetaData => None,
             Protocol::LightClientBootstrap => None,
@@ -308,6 +330,7 @@ pub enum SupportedProtocol {
     BlobsByRootV1,
     DataColumnsByRootV1,
     DataColumnsByRangeV1,
+    ExecutionPayloadEnvelopesByRangeV1,
     PingV1,
     MetaDataV1,
     MetaDataV2,
@@ -332,6 +355,7 @@ impl SupportedProtocol {
             SupportedProtocol::BlobsByRootV1 => "1",
             SupportedProtocol::DataColumnsByRootV1 => "1",
             SupportedProtocol::DataColumnsByRangeV1 => "1",
+            SupportedProtocol::ExecutionPayloadEnvelopesByRangeV1 => "1",
             SupportedProtocol::PingV1 => "1",
             SupportedProtocol::MetaDataV1 => "1",
             SupportedProtocol::MetaDataV2 => "2",
@@ -356,6 +380,9 @@ impl SupportedProtocol {
             SupportedProtocol::BlobsByRootV1 => Protocol::BlobsByRoot,
             SupportedProtocol::DataColumnsByRootV1 => Protocol::DataColumnsByRoot,
             SupportedProtocol::DataColumnsByRangeV1 => Protocol::DataColumnsByRange,
+            SupportedProtocol::ExecutionPayloadEnvelopesByRangeV1 => {
+                Protocol::ExecutionPayloadEnvelopesByRange
+            }
             SupportedProtocol::PingV1 => Protocol::Ping,
             SupportedProtocol::MetaDataV1 => Protocol::MetaData,
             SupportedProtocol::MetaDataV2 => Protocol::MetaData,
@@ -405,6 +432,12 @@ impl SupportedProtocol {
                 ProtocolId::new(SupportedProtocol::DataColumnsByRootV1, Encoding::SSZSnappy),
                 ProtocolId::new(SupportedProtocol::DataColumnsByRangeV1, Encoding::SSZSnappy),
             ]);
+        }
+        if fork_context.spec.is_gloas_scheduled() {
+            supported.extend_from_slice(&[ProtocolId::new(
+                SupportedProtocol::ExecutionPayloadEnvelopesByRangeV1,
+                Encoding::SSZSnappy,
+            )]);
         }
         supported
     }
@@ -519,6 +552,10 @@ impl ProtocolId {
                 DataColumnsByRangeRequest::ssz_min_len(),
                 DataColumnsByRangeRequest::ssz_max_len::<E>(),
             ),
+            Protocol::ExecutionPayloadEnvelopesByRange => RpcLimits::new(
+                <ExecutionPayloadEnvelopesByRangeRequest as Encode>::ssz_fixed_len(),
+                <ExecutionPayloadEnvelopesByRangeRequest as Encode>::ssz_fixed_len(),
+            ),
             Protocol::Ping => RpcLimits::new(
                 <Ping as Encode>::ssz_fixed_len(),
                 <Ping as Encode>::ssz_fixed_len(),
@@ -555,6 +592,9 @@ impl ProtocolId {
             Protocol::DataColumnsByRange => {
                 rpc_data_column_limits::<E>(fork_context.current_fork_epoch(), &fork_context.spec)
             }
+            Protocol::ExecutionPayloadEnvelopesByRange => {
+                rpc_execution_payload_envelope_limits_by_fork::<E>(fork_context.current_fork_name())
+            }
             Protocol::Ping => RpcLimits::new(
                 <Ping as Encode>::ssz_fixed_len(),
                 <Ping as Encode>::ssz_fixed_len(),
@@ -588,6 +628,7 @@ impl ProtocolId {
             | SupportedProtocol::BlobsByRootV1
             | SupportedProtocol::DataColumnsByRootV1
             | SupportedProtocol::DataColumnsByRangeV1
+            | SupportedProtocol::ExecutionPayloadEnvelopesByRangeV1
             | SupportedProtocol::LightClientBootstrapV1
             | SupportedProtocol::LightClientOptimisticUpdateV1
             | SupportedProtocol::LightClientFinalityUpdateV1
@@ -620,6 +661,31 @@ impl ProtocolId {
             versioned_protocol,
             encoding,
             protocol_id,
+        }
+    }
+}
+
+fn rpc_execution_payload_envelope_limits_by_fork<E: EthSpec>(current_fork: ForkName) -> RpcLimits {
+    match current_fork {
+        ForkName::Base
+        | ForkName::Altair
+        | ForkName::Bellatrix
+        | ForkName::Capella
+        | ForkName::Deneb
+        | ForkName::Electra
+        | ForkName::Fulu => {
+            // ExecutionPayloadEnvelopes are only available from Gloas fork onward
+            RpcLimits::new(0, 0)
+        }
+        ForkName::Gloas => {
+            // The spec says: "Specifications of req\response methods are equivalent to BeaconBlocksByRange v2,
+            // with the only difference being the response content type."
+            // We follow the same pattern as beacon blocks: calculate limits based on actual structure sizes
+            // rather than guessing with magic numbers.
+            RpcLimits::new(
+                *SIGNED_EXECUTION_PAYLOAD_ENVELOPE_GLOAS_MIN,
+                *SIGNED_EXECUTION_PAYLOAD_ENVELOPE_GLOAS_MAX,
+            )
         }
     }
 }
@@ -727,6 +793,7 @@ pub enum RequestType<E: EthSpec> {
     BlobsByRoot(BlobsByRootRequest),
     DataColumnsByRoot(DataColumnsByRootRequest<E>),
     DataColumnsByRange(DataColumnsByRangeRequest),
+    ExecutionPayloadEnvelopesByRange(ExecutionPayloadEnvelopesByRangeRequest),
     LightClientBootstrap(LightClientBootstrapRequest),
     LightClientOptimisticUpdate,
     LightClientFinalityUpdate,
@@ -750,6 +817,7 @@ impl<E: EthSpec> RequestType<E> {
             RequestType::BlobsByRoot(req) => req.blob_ids.len() as u64,
             RequestType::DataColumnsByRoot(req) => req.max_requested() as u64,
             RequestType::DataColumnsByRange(req) => req.max_requested::<E>(),
+            RequestType::ExecutionPayloadEnvelopesByRange(req) => req.count,
             RequestType::Ping(_) => 1,
             RequestType::MetaData(_) => 1,
             RequestType::LightClientBootstrap(_) => 1,
@@ -779,6 +847,9 @@ impl<E: EthSpec> RequestType<E> {
             RequestType::BlobsByRoot(_) => SupportedProtocol::BlobsByRootV1,
             RequestType::DataColumnsByRoot(_) => SupportedProtocol::DataColumnsByRootV1,
             RequestType::DataColumnsByRange(_) => SupportedProtocol::DataColumnsByRangeV1,
+            RequestType::ExecutionPayloadEnvelopesByRange(_) => {
+                SupportedProtocol::ExecutionPayloadEnvelopesByRangeV1
+            }
             RequestType::Ping(_) => SupportedProtocol::PingV1,
             RequestType::MetaData(req) => match req {
                 MetadataRequest::V1(_) => SupportedProtocol::MetaDataV1,
@@ -810,6 +881,9 @@ impl<E: EthSpec> RequestType<E> {
             RequestType::BlobsByRoot(_) => ResponseTermination::BlobsByRoot,
             RequestType::DataColumnsByRoot(_) => ResponseTermination::DataColumnsByRoot,
             RequestType::DataColumnsByRange(_) => ResponseTermination::DataColumnsByRange,
+            RequestType::ExecutionPayloadEnvelopesByRange(_) => {
+                ResponseTermination::ExecutionPayloadEnvelopesByRange
+            }
             RequestType::Status(_) => unreachable!(),
             RequestType::Goodbye(_) => unreachable!(),
             RequestType::Ping(_) => unreachable!(),
@@ -856,6 +930,10 @@ impl<E: EthSpec> RequestType<E> {
                 SupportedProtocol::DataColumnsByRangeV1,
                 Encoding::SSZSnappy,
             )],
+            RequestType::ExecutionPayloadEnvelopesByRange(_) => vec![ProtocolId::new(
+                SupportedProtocol::ExecutionPayloadEnvelopesByRangeV1,
+                Encoding::SSZSnappy,
+            )],
             RequestType::Ping(_) => vec![ProtocolId::new(
                 SupportedProtocol::PingV1,
                 Encoding::SSZSnappy,
@@ -894,6 +972,7 @@ impl<E: EthSpec> RequestType<E> {
             RequestType::BlobsByRoot(_) => false,
             RequestType::DataColumnsByRoot(_) => false,
             RequestType::DataColumnsByRange(_) => false,
+            RequestType::ExecutionPayloadEnvelopesByRange(_) => false,
             RequestType::Ping(_) => true,
             RequestType::MetaData(_) => true,
             RequestType::LightClientBootstrap(_) => true,
@@ -1006,6 +1085,9 @@ impl<E: EthSpec> std::fmt::Display for RequestType<E> {
             RequestType::DataColumnsByRoot(req) => write!(f, "Data columns by root: {:?}", req),
             RequestType::DataColumnsByRange(req) => {
                 write!(f, "Data columns by range: {:?}", req)
+            }
+            RequestType::ExecutionPayloadEnvelopesByRange(req) => {
+                write!(f, "Execution payload envelopes by range: {:?}", req)
             }
             RequestType::Ping(ping) => write!(f, "Ping: {}", ping.data),
             RequestType::MetaData(_) => write!(f, "MetaData request"),

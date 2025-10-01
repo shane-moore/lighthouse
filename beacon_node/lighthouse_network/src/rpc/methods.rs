@@ -17,8 +17,8 @@ use types::light_client_update::MAX_REQUEST_LIGHT_CLIENT_UPDATES;
 use types::{
     ChainSpec, ColumnIndex, DataColumnSidecar, DataColumnsByRootIdentifier, Epoch, EthSpec,
     ForkContext, Hash256, LightClientBootstrap, LightClientFinalityUpdate,
-    LightClientOptimisticUpdate, LightClientUpdate, RuntimeVariableList, SignedBeaconBlock, Slot,
-    blob_sidecar::BlobSidecar,
+    LightClientOptimisticUpdate, LightClientUpdate, RuntimeVariableList, SignedBeaconBlock,
+    SignedExecutionPayloadEnvelope, Slot, blob_sidecar::BlobSidecar,
 };
 
 /// Maximum length of error message.
@@ -411,6 +411,21 @@ impl DataColumnsByRangeRequest {
     }
 }
 
+/// Request a number of execution payload envelopes from a peer.
+#[derive(Encode, Decode, Clone, Debug, PartialEq)]
+pub struct ExecutionPayloadEnvelopesByRangeRequest {
+    /// The starting slot to request execution payload envelopes.
+    pub start_slot: u64,
+    /// The number of slots from the start slot.
+    pub count: u64,
+}
+
+impl ExecutionPayloadEnvelopesByRangeRequest {
+    pub fn new(start_slot: u64, count: u64) -> Self {
+        Self { start_slot, count }
+    }
+}
+
 /// Request a number of beacon block roots from a peer.
 #[superstruct(
     variants(V1, V2),
@@ -598,6 +613,9 @@ pub enum RpcSuccessResponse<E: EthSpec> {
     /// A response to a get LIGHT_CLIENT_UPDATES_BY_RANGE request.
     LightClientUpdatesByRange(Arc<LightClientUpdate<E>>),
 
+    /// A response to a get EXECUTION_PAYLOAD_ENVELOPES_BY_RANGE request.
+    ExecutionPayloadEnvelopesByRange(Arc<SignedExecutionPayloadEnvelope<E>>),
+
     /// A response to a get BLOBS_BY_ROOT request.
     BlobsByRoot(Arc<BlobSidecar<E>>),
 
@@ -637,6 +655,9 @@ pub enum ResponseTermination {
 
     /// Light client updates by range stream termination.
     LightClientUpdatesByRange,
+
+    /// Execution payload envelopes by range stream termination.
+    ExecutionPayloadEnvelopesByRange,
 }
 
 impl ResponseTermination {
@@ -649,6 +670,9 @@ impl ResponseTermination {
             ResponseTermination::DataColumnsByRoot => Protocol::DataColumnsByRoot,
             ResponseTermination::DataColumnsByRange => Protocol::DataColumnsByRange,
             ResponseTermination::LightClientUpdatesByRange => Protocol::LightClientUpdatesByRange,
+            ResponseTermination::ExecutionPayloadEnvelopesByRange => {
+                Protocol::ExecutionPayloadEnvelopesByRange
+            }
         }
     }
 }
@@ -743,6 +767,9 @@ impl<E: EthSpec> RpcSuccessResponse<E> {
             RpcSuccessResponse::BlobsByRoot(_) => Protocol::BlobsByRoot,
             RpcSuccessResponse::DataColumnsByRoot(_) => Protocol::DataColumnsByRoot,
             RpcSuccessResponse::DataColumnsByRange(_) => Protocol::DataColumnsByRange,
+            RpcSuccessResponse::ExecutionPayloadEnvelopesByRange(_) => {
+                Protocol::ExecutionPayloadEnvelopesByRange
+            }
             RpcSuccessResponse::Pong(_) => Protocol::Ping,
             RpcSuccessResponse::MetaData(_) => Protocol::MetaData,
             RpcSuccessResponse::LightClientBootstrap(_) => Protocol::LightClientBootstrap,
@@ -763,6 +790,7 @@ impl<E: EthSpec> RpcSuccessResponse<E> {
             Self::DataColumnsByRange(r) | Self::DataColumnsByRoot(r) => {
                 Some(r.signed_block_header.message.slot)
             }
+            Self::ExecutionPayloadEnvelopesByRange(r) => Some(r.message().slot()),
             Self::LightClientBootstrap(r) => Some(r.get_slot()),
             Self::LightClientFinalityUpdate(r) => Some(r.get_attested_header_slot()),
             Self::LightClientOptimisticUpdate(r) => Some(r.get_slot()),
@@ -825,6 +853,13 @@ impl<E: EthSpec> std::fmt::Display for RpcSuccessResponse<E> {
                     f,
                     "DataColumnsByRange: Data column slot: {}",
                     sidecar.slot()
+                )
+            }
+            RpcSuccessResponse::ExecutionPayloadEnvelopesByRange(envelope) => {
+                write!(
+                    f,
+                    "ExecutionPayloadEnvelopesByRange: Envelope slot: {}",
+                    envelope.message().slot()
                 )
             }
             RpcSuccessResponse::Pong(ping) => write!(f, "Pong: {}", ping.data),

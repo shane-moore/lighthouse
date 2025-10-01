@@ -7,6 +7,7 @@ use beacon_chain::{BeaconChainError, BeaconChainTypes, WhenSlotSkipped};
 use itertools::{Itertools, process_results};
 use lighthouse_network::rpc::methods::{
     BlobsByRangeRequest, BlobsByRootRequest, DataColumnsByRangeRequest, DataColumnsByRootRequest,
+    ExecutionPayloadEnvelopesByRangeRequest,
 };
 use lighthouse_network::rpc::*;
 use lighthouse_network::{PeerId, ReportSource, Response, SyncInfo};
@@ -14,8 +15,9 @@ use lighthouse_tracing::{
     SPAN_HANDLE_BLOBS_BY_RANGE_REQUEST, SPAN_HANDLE_BLOBS_BY_ROOT_REQUEST,
     SPAN_HANDLE_BLOCKS_BY_RANGE_REQUEST, SPAN_HANDLE_BLOCKS_BY_ROOT_REQUEST,
     SPAN_HANDLE_DATA_COLUMNS_BY_RANGE_REQUEST, SPAN_HANDLE_DATA_COLUMNS_BY_ROOT_REQUEST,
-    SPAN_HANDLE_LIGHT_CLIENT_BOOTSTRAP, SPAN_HANDLE_LIGHT_CLIENT_FINALITY_UPDATE,
-    SPAN_HANDLE_LIGHT_CLIENT_OPTIMISTIC_UPDATE, SPAN_HANDLE_LIGHT_CLIENT_UPDATES_BY_RANGE,
+    SPAN_HANDLE_EXECUTION_PAYLOAD_ENVELOPES_BY_RANGE_REQUEST, SPAN_HANDLE_LIGHT_CLIENT_BOOTSTRAP,
+    SPAN_HANDLE_LIGHT_CLIENT_FINALITY_UPDATE, SPAN_HANDLE_LIGHT_CLIENT_OPTIMISTIC_UPDATE,
+    SPAN_HANDLE_LIGHT_CLIENT_UPDATES_BY_RANGE,
 };
 use methods::LightClientUpdatesByRangeRequest;
 use slot_clock::SlotClock;
@@ -1328,5 +1330,57 @@ impl<T: BeaconChainTypes> NetworkBeaconProcessor<T> {
 
         let client = self.network_globals.client(peer_id);
         span.record("client", field::display(client.kind));
+    }
+
+    /// Handle a `ExecutionPayloadEnvelopesByRange` request from the peer.
+    #[instrument(
+        name = SPAN_HANDLE_EXECUTION_PAYLOAD_ENVELOPES_BY_RANGE_REQUEST,
+        parent = None,
+        level = "debug",
+        skip_all,
+        fields(peer_id = %peer_id, client = tracing::field::Empty)
+    )]
+    pub fn handle_execution_payload_envelopes_by_range_request(
+        &self,
+        peer_id: PeerId,
+        inbound_request_id: InboundRequestId,
+        request: ExecutionPayloadEnvelopesByRangeRequest,
+    ) {
+        let client = self.network_globals.client(&peer_id);
+        Span::current().record("client", field::display(client.kind));
+
+        self.terminate_response_stream(
+            peer_id,
+            inbound_request_id,
+            self.handle_execution_payload_envelopes_by_range_request_inner(
+                peer_id,
+                inbound_request_id,
+                request,
+            ),
+            Response::ExecutionPayloadEnvelopesByRange,
+        );
+    }
+
+    /// Handle a `ExecutionPayloadEnvelopesByRange` request from the peer.
+    fn handle_execution_payload_envelopes_by_range_request_inner(
+        &self,
+        peer_id: PeerId,
+        _inbound_request_id: InboundRequestId,
+        request: ExecutionPayloadEnvelopesByRangeRequest,
+    ) -> Result<(), (RpcErrorResponse, &'static str)> {
+        debug!(
+            %peer_id,
+            count = request.count,
+            start_slot = request.start_slot,
+            "Received ExecutionPayloadEnvelopesByRange Request"
+        );
+
+        todo!("TODO(EIP-7732): Implement actual execution payload envelope handling");
+        // This will likely follow a similar pattern to handle_blocks_by_range_request_inner:
+        // 1. Validate request parameters (count, start_slot)
+        // 2. Get block roots for the slot range using get_block_roots_for_slot_range
+        // 3. Retrieve execution payload envelopes for each block root
+        // 4. Stream responses back to peer using send_network_message
+        // 5. Handle errors and edge cases (missing envelopes, execution layer issues, etc.)
     }
 }

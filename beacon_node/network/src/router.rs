@@ -251,6 +251,15 @@ impl<T: BeaconChainTypes> Router<T> {
                 self.network_beacon_processor
                     .send_data_columns_by_range_request(peer_id, inbound_request_id, request),
             ),
+            RequestType::ExecutionPayloadEnvelopesByRange(request) => self
+                .handle_beacon_processor_send_result(
+                    self.network_beacon_processor
+                        .send_execution_payload_envelopes_by_range_request(
+                            peer_id,
+                            inbound_request_id,
+                            request,
+                        ),
+                ),
             RequestType::LightClientBootstrap(request) => self.handle_beacon_processor_send_result(
                 self.network_beacon_processor
                     .send_light_client_bootstrap_request(peer_id, inbound_request_id, request),
@@ -308,6 +317,13 @@ impl<T: BeaconChainTypes> Router<T> {
             }
             Response::DataColumnsByRange(data_column) => {
                 self.on_data_columns_by_range_response(peer_id, app_request_id, data_column);
+            }
+            Response::ExecutionPayloadEnvelopesByRange(envelope) => {
+                self.on_execution_payload_envelopes_by_range_response(
+                    peer_id,
+                    app_request_id,
+                    envelope,
+                );
             }
             // Light client responses should not be received
             Response::LightClientBootstrap(_)
@@ -724,6 +740,36 @@ impl<T: BeaconChainTypes> Router<T> {
             });
         } else {
             crit!("All data columns by range responses should belong to sync");
+        }
+    }
+
+    pub fn on_execution_payload_envelopes_by_range_response(
+        &mut self,
+        peer_id: PeerId,
+        app_request_id: AppRequestId,
+        envelope: Option<Arc<types::SignedExecutionPayloadEnvelope<T::EthSpec>>>,
+    ) {
+        trace!(
+            %peer_id,
+            envelope_present = envelope.is_some(),
+            "Received ExecutionPayloadEnvelopesByRange Response"
+        );
+
+        // All ExecutionPayloadEnvelopesByRange requests should belong to sync
+        match app_request_id {
+            AppRequestId::Sync(sync_request_id) => {
+                self.send_to_sync(SyncMessage::RpcExecutionPayloadEnvelope {
+                    sync_request_id,
+                    peer_id,
+                    envelope,
+                    seen_timestamp: timestamp_now(),
+                });
+            }
+            AppRequestId::Router => {
+                crit!(%peer_id, "All ExecutionPayloadEnvelopesByRange requests belong to sync");
+                return;
+            }
+            AppRequestId::Internal => unreachable!("Handled internally"),
         }
     }
 

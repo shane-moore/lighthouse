@@ -115,6 +115,7 @@ pub struct BeaconProcessorQueueLengths {
     rpc_block_queue: usize,
     rpc_blob_queue: usize,
     rpc_custody_column_queue: usize,
+    envelope_range_queue: usize,
     column_reconstruction_queue: usize,
     chain_segment_queue: usize,
     backfill_chain_segment: usize,
@@ -181,6 +182,7 @@ impl BeaconProcessorQueueLengths {
             // We don't request more than `PARENT_DEPTH_TOLERANCE` (32) lookups, so we can limit
             // this queue size. With 48 max blobs per block, each column sidecar list could be up to 12MB.
             rpc_custody_column_queue: 64,
+            envelope_range_queue: 1024,
             column_reconstruction_queue: 64,
             chain_segment_queue: 64,
             backfill_chain_segment: 64,
@@ -611,6 +613,7 @@ pub enum Work<E: EthSpec> {
     BlobsByRootsRequest(BlockingFn),
     DataColumnsByRootsRequest(BlockingFn),
     DataColumnsByRangeRequest(BlockingFn),
+    ExecutionPayloadEnvelopesByRangeRequest(BlockingFn),
     GossipBlsToExecutionChange(BlockingFn),
     LightClientBootstrapRequest(BlockingFn),
     LightClientOptimisticUpdateRequest(BlockingFn),
@@ -663,6 +666,7 @@ pub enum WorkType {
     BlobsByRootsRequest,
     DataColumnsByRootsRequest,
     DataColumnsByRangeRequest,
+    ExecutionPayloadEnvelopesByRangeRequest,
     GossipBlsToExecutionChange,
     LightClientBootstrapRequest,
     LightClientOptimisticUpdateRequest,
@@ -713,6 +717,9 @@ impl<E: EthSpec> Work<E> {
             Work::BlobsByRootsRequest(_) => WorkType::BlobsByRootsRequest,
             Work::DataColumnsByRootsRequest(_) => WorkType::DataColumnsByRootsRequest,
             Work::DataColumnsByRangeRequest(_) => WorkType::DataColumnsByRangeRequest,
+            Work::ExecutionPayloadEnvelopesByRangeRequest(_) => {
+                WorkType::ExecutionPayloadEnvelopesByRangeRequest
+            }
             Work::LightClientBootstrapRequest(_) => WorkType::LightClientBootstrapRequest,
             Work::LightClientOptimisticUpdateRequest(_) => {
                 WorkType::LightClientOptimisticUpdateRequest
@@ -866,6 +873,7 @@ impl<E: EthSpec> BeaconProcessor<E> {
         let mut rpc_block_queue = FifoQueue::new(queue_lengths.rpc_block_queue);
         let mut rpc_blob_queue = FifoQueue::new(queue_lengths.rpc_blob_queue);
         let mut rpc_custody_column_queue = FifoQueue::new(queue_lengths.rpc_custody_column_queue);
+        let mut envelope_range_queue = FifoQueue::new(queue_lengths.envelope_range_queue);
         let mut column_reconstruction_queue =
             FifoQueue::new(queue_lengths.column_reconstruction_queue);
         let mut chain_segment_queue = FifoQueue::new(queue_lengths.chain_segment_queue);
@@ -1042,6 +1050,9 @@ impl<E: EthSpec> BeaconProcessor<E> {
                             } else if let Some(item) = rpc_custody_column_queue.pop() {
                                 Some(item)
                             } else if let Some(item) = rpc_custody_column_queue.pop() {
+                                Some(item)
+                                // TODO(EIP-7732): check if team is ok with this priority ordering of envelope_range_queue
+                            } else if let Some(item) = envelope_range_queue.pop() {
                                 Some(item)
                             // Check delayed blocks before gossip blocks, the gossip blocks might rely
                             // on the delayed ones.
@@ -1393,6 +1404,9 @@ impl<E: EthSpec> BeaconProcessor<E> {
                             Work::DataColumnsByRangeRequest { .. } => {
                                 dcbrange_queue.push(work, work_id)
                             }
+                            Work::ExecutionPayloadEnvelopesByRangeRequest { .. } => {
+                                envelope_range_queue.push(work, work_id)
+                            }
                             Work::UnknownLightClientOptimisticUpdate { .. } => {
                                 unknown_light_client_update_queue.push(work, work_id)
                             }
@@ -1443,6 +1457,9 @@ impl<E: EthSpec> BeaconProcessor<E> {
                         WorkType::BlobsByRootsRequest => bbroots_queue.len(),
                         WorkType::DataColumnsByRootsRequest => dcbroots_queue.len(),
                         WorkType::DataColumnsByRangeRequest => dcbrange_queue.len(),
+                        WorkType::ExecutionPayloadEnvelopesByRangeRequest => {
+                            envelope_range_queue.len()
+                        }
                         WorkType::GossipBlsToExecutionChange => {
                             gossip_bls_to_execution_change_queue.len()
                         }
@@ -1619,6 +1636,7 @@ impl<E: EthSpec> BeaconProcessor<E> {
             | Work::GossipLightClientOptimisticUpdate(process_fn)
             | Work::Status(process_fn)
             | Work::GossipBlsToExecutionChange(process_fn)
+            | Work::ExecutionPayloadEnvelopesByRangeRequest(process_fn)
             | Work::LightClientBootstrapRequest(process_fn)
             | Work::LightClientOptimisticUpdateRequest(process_fn)
             | Work::LightClientFinalityUpdateRequest(process_fn)
