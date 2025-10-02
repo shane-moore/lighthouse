@@ -1580,6 +1580,17 @@ impl<E: EthSpec> Network<E> {
                             request_type,
                         })
                     }
+                    RequestType::ExecutionPayloadEnvelopesByRoot(_) => {
+                        metrics::inc_counter_vec(
+                            &metrics::TOTAL_RPC_REQUESTS,
+                            &["execution_payload_envelopes_by_root"],
+                        );
+                        Some(NetworkEvent::RequestReceived {
+                            peer_id,
+                            inbound_request_id,
+                            request_type,
+                        })
+                    }
                     RequestType::LightClientBootstrap(_) => {
                         metrics::inc_counter_vec(
                             &metrics::TOTAL_RPC_REQUESTS,
@@ -1671,6 +1682,12 @@ impl<E: EthSpec> Network<E> {
                             peer_id,
                             Response::ExecutionPayloadEnvelopesByRange(Some(envelope)),
                         ),
+                    RpcSuccessResponse::ExecutionPayloadEnvelopesByRoot(envelope) => self
+                        .build_response(
+                            id,
+                            peer_id,
+                            Response::ExecutionPayloadEnvelopesByRoot(Some(envelope)),
+                        ),
                     // Should never be reached
                     RpcSuccessResponse::LightClientBootstrap(bootstrap) => {
                         self.build_response(id, peer_id, Response::LightClientBootstrap(bootstrap))
@@ -1702,6 +1719,9 @@ impl<E: EthSpec> Network<E> {
                     ResponseTermination::DataColumnsByRange => Response::DataColumnsByRange(None),
                     ResponseTermination::ExecutionPayloadEnvelopesByRange => {
                         Response::ExecutionPayloadEnvelopesByRange(None)
+                    }
+                    ResponseTermination::ExecutionPayloadEnvelopesByRoot => {
+                        Response::ExecutionPayloadEnvelopesByRoot(None)
                     }
                     ResponseTermination::LightClientUpdatesByRange => {
                         Response::LightClientUpdatesByRange(None)

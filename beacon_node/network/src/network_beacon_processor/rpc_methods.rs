@@ -7,7 +7,7 @@ use beacon_chain::{BeaconChainError, BeaconChainTypes, WhenSlotSkipped};
 use itertools::{Itertools, process_results};
 use lighthouse_network::rpc::methods::{
     BlobsByRangeRequest, BlobsByRootRequest, DataColumnsByRangeRequest, DataColumnsByRootRequest,
-    ExecutionPayloadEnvelopesByRangeRequest,
+    ExecutionPayloadEnvelopesByRangeRequest, ExecutionPayloadEnvelopesByRootRequest,
 };
 use lighthouse_network::rpc::*;
 use lighthouse_network::{PeerId, ReportSource, Response, SyncInfo};
@@ -1382,5 +1382,56 @@ impl<T: BeaconChainTypes> NetworkBeaconProcessor<T> {
         // 3. Retrieve execution payload envelopes for each block root
         // 4. Stream responses back to peer using send_network_message
         // 5. Handle errors and edge cases (missing envelopes, execution layer issues, etc.)
+    }
+
+    /// Handle a `ExecutionPayloadEnvelopesByRoot` request from the peer.
+    #[instrument(
+        name = "handle_execution_payload_envelopes_by_root_request",
+        parent = None,
+        level = "debug",
+        skip_all,
+        fields(peer_id = %peer_id, client = tracing::field::Empty)
+    )]
+    pub fn handle_execution_payload_envelopes_by_root_request(
+        &self,
+        peer_id: PeerId,
+        inbound_request_id: InboundRequestId,
+        request: ExecutionPayloadEnvelopesByRootRequest,
+    ) {
+        let client = self.network_globals.client(&peer_id);
+        Span::current().record("client", field::display(client.kind));
+
+        self.terminate_response_stream(
+            peer_id,
+            inbound_request_id,
+            self.handle_execution_payload_envelopes_by_root_request_inner(
+                peer_id,
+                inbound_request_id,
+                request,
+            ),
+            Response::ExecutionPayloadEnvelopesByRoot,
+        );
+    }
+
+    /// Handle a `ExecutionPayloadEnvelopesByRoot` request from the peer.
+    fn handle_execution_payload_envelopes_by_root_request_inner(
+        &self,
+        peer_id: PeerId,
+        _inbound_request_id: InboundRequestId,
+        request: ExecutionPayloadEnvelopesByRootRequest,
+    ) -> Result<(), (RpcErrorResponse, &'static str)> {
+        debug!(
+            %peer_id,
+            count = request.block_roots.len(),
+            "Received ExecutionPayloadEnvelopesByRoot Request"
+        );
+
+        todo!("TODO(EIP-7732): Implement execution payload envelope retrieval by block root");
+        // This will likely follow a similar pattern to handle_blobs_by_root_request_inner:
+        // 1. Validate request parameters (block_roots count <= MAX_REQUEST_PAYLOADS)
+        // 2. For each block_root in request.block_roots, retrieve the execution payload envelope from storage
+        // 3. Stream responses back to peer using self.send_response() with Response::ExecutionPayloadEnvelopesByRoot(Some(envelope))
+        // 4. Handle errors and edge cases (missing envelopes, execution layer issues, etc.)
+        // 5. Log results at the end showing peer_id, requested count, and returned count
     }
 }

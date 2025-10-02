@@ -260,6 +260,15 @@ impl<T: BeaconChainTypes> Router<T> {
                             request,
                         ),
                 ),
+            RequestType::ExecutionPayloadEnvelopesByRoot(request) => self
+                .handle_beacon_processor_send_result(
+                    self.network_beacon_processor
+                        .send_execution_payload_envelopes_by_root_request(
+                            peer_id,
+                            inbound_request_id,
+                            request,
+                        ),
+                ),
             RequestType::LightClientBootstrap(request) => self.handle_beacon_processor_send_result(
                 self.network_beacon_processor
                     .send_light_client_bootstrap_request(peer_id, inbound_request_id, request),
@@ -320,6 +329,13 @@ impl<T: BeaconChainTypes> Router<T> {
             }
             Response::ExecutionPayloadEnvelopesByRange(envelope) => {
                 self.on_execution_payload_envelopes_by_range_response(
+                    peer_id,
+                    app_request_id,
+                    envelope,
+                );
+            }
+            Response::ExecutionPayloadEnvelopesByRoot(envelope) => {
+                self.on_execution_payload_envelopes_by_root_response(
                     peer_id,
                     app_request_id,
                     envelope,
@@ -767,6 +783,36 @@ impl<T: BeaconChainTypes> Router<T> {
             }
             AppRequestId::Router => {
                 crit!(%peer_id, "All ExecutionPayloadEnvelopesByRange requests belong to sync");
+                return;
+            }
+            AppRequestId::Internal => unreachable!("Handled internally"),
+        }
+    }
+
+    pub fn on_execution_payload_envelopes_by_root_response(
+        &mut self,
+        peer_id: PeerId,
+        app_request_id: AppRequestId,
+        envelope: Option<Arc<types::SignedExecutionPayloadEnvelope<T::EthSpec>>>,
+    ) {
+        trace!(
+            %peer_id,
+            envelope_present = envelope.is_some(),
+            "Received ExecutionPayloadEnvelopesByRoot Response"
+        );
+
+        // All ExecutionPayloadEnvelopesByRoot requests should belong to sync
+        match app_request_id {
+            AppRequestId::Sync(sync_request_id) => {
+                self.send_to_sync(SyncMessage::RpcExecutionPayloadEnvelope {
+                    sync_request_id,
+                    peer_id,
+                    envelope,
+                    seen_timestamp: timestamp_now(),
+                });
+            }
+            AppRequestId::Router => {
+                crit!(%peer_id, "All ExecutionPayloadEnvelopesByRoot requests belong to sync");
                 return;
             }
             AppRequestId::Internal => unreachable!("Handled internally"),
