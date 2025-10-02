@@ -426,6 +426,21 @@ impl ExecutionPayloadEnvelopesByRangeRequest {
     }
 }
 
+/// Request execution payload envelopes by their block roots.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ExecutionPayloadEnvelopesByRootRequest {
+    /// The list of beacon block roots being requested.
+    pub block_roots: RuntimeVariableList<Hash256>,
+}
+
+impl ExecutionPayloadEnvelopesByRootRequest {
+    pub fn new(block_roots: Vec<Hash256>, max_request_payloads: usize) -> Result<Self, String> {
+        let block_roots = RuntimeVariableList::new(block_roots, max_request_payloads)
+            .map_err(|e| format!("ExecutionPayloadEnvelopesByRootRequest too many roots: {e:?}"))?;
+        Ok(Self { block_roots })
+    }
+}
+
 /// Request a number of beacon block roots from a peer.
 #[superstruct(
     variants(V1, V2),
@@ -616,6 +631,9 @@ pub enum RpcSuccessResponse<E: EthSpec> {
     /// A response to a get EXECUTION_PAYLOAD_ENVELOPES_BY_RANGE request.
     ExecutionPayloadEnvelopesByRange(Arc<SignedExecutionPayloadEnvelope<E>>),
 
+    /// A response to a get EXECUTION_PAYLOAD_ENVELOPES_BY_ROOT request.
+    ExecutionPayloadEnvelopesByRoot(Arc<SignedExecutionPayloadEnvelope<E>>),
+
     /// A response to a get BLOBS_BY_ROOT request.
     BlobsByRoot(Arc<BlobSidecar<E>>),
 
@@ -658,6 +676,9 @@ pub enum ResponseTermination {
 
     /// Execution payload envelopes by range stream termination.
     ExecutionPayloadEnvelopesByRange,
+
+    /// Execution payload envelopes by root stream termination.
+    ExecutionPayloadEnvelopesByRoot,
 }
 
 impl ResponseTermination {
@@ -672,6 +693,9 @@ impl ResponseTermination {
             ResponseTermination::LightClientUpdatesByRange => Protocol::LightClientUpdatesByRange,
             ResponseTermination::ExecutionPayloadEnvelopesByRange => {
                 Protocol::ExecutionPayloadEnvelopesByRange
+            }
+            ResponseTermination::ExecutionPayloadEnvelopesByRoot => {
+                Protocol::ExecutionPayloadEnvelopesByRoot
             }
         }
     }
@@ -770,6 +794,9 @@ impl<E: EthSpec> RpcSuccessResponse<E> {
             RpcSuccessResponse::ExecutionPayloadEnvelopesByRange(_) => {
                 Protocol::ExecutionPayloadEnvelopesByRange
             }
+            RpcSuccessResponse::ExecutionPayloadEnvelopesByRoot(_) => {
+                Protocol::ExecutionPayloadEnvelopesByRoot
+            }
             RpcSuccessResponse::Pong(_) => Protocol::Ping,
             RpcSuccessResponse::MetaData(_) => Protocol::MetaData,
             RpcSuccessResponse::LightClientBootstrap(_) => Protocol::LightClientBootstrap,
@@ -791,6 +818,7 @@ impl<E: EthSpec> RpcSuccessResponse<E> {
                 Some(r.signed_block_header.message.slot)
             }
             Self::ExecutionPayloadEnvelopesByRange(r) => Some(r.message().slot()),
+            Self::ExecutionPayloadEnvelopesByRoot(r) => Some(r.message().slot()),
             Self::LightClientBootstrap(r) => Some(r.get_slot()),
             Self::LightClientFinalityUpdate(r) => Some(r.get_attested_header_slot()),
             Self::LightClientOptimisticUpdate(r) => Some(r.get_slot()),
@@ -859,6 +887,13 @@ impl<E: EthSpec> std::fmt::Display for RpcSuccessResponse<E> {
                 write!(
                     f,
                     "ExecutionPayloadEnvelopesByRange: Envelope slot: {}",
+                    envelope.message().slot()
+                )
+            }
+            RpcSuccessResponse::ExecutionPayloadEnvelopesByRoot(envelope) => {
+                write!(
+                    f,
+                    "ExecutionPayloadEnvelopesByRoot: Envelope slot: {}",
                     envelope.message().slot()
                 )
             }

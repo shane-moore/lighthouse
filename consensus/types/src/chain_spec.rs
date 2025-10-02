@@ -267,6 +267,7 @@ pub struct ChainSpec {
     /*
      * Networking Gloas
      */
+    pub max_request_payloads: u64,
 
     /*
      * Networking Derived
@@ -277,6 +278,7 @@ pub struct ChainSpec {
     pub max_blocks_by_root_request_deneb: usize,
     pub max_blobs_by_root_request: usize,
     pub max_data_columns_by_root_request: usize,
+    pub max_execution_payload_envelopes_by_root_request: usize,
 
     /*
      * Application params
@@ -1142,6 +1144,17 @@ impl ChainSpec {
             max_data_columns_by_root_request: default_data_columns_by_root_request(),
 
             /*
+             * Networking Gloas specific
+             */
+            max_request_payloads: default_max_request_payloads(),
+
+            /*
+             * Derived Gloas Specific
+             */
+            max_execution_payload_envelopes_by_root_request:
+                default_max_execution_payload_envelopes_by_root_request(),
+
+            /*
              * Application specific
              */
             domain_application_mask: APPLICATION_DOMAIN_BUILDER,
@@ -1493,6 +1506,17 @@ impl ChainSpec {
             max_data_columns_by_root_request: default_data_columns_by_root_request(),
 
             /*
+             * Networking Gloas specific
+             */
+            max_request_payloads: default_max_request_payloads(),
+
+            /*
+             * Derived Gloas Specific
+             */
+            max_execution_payload_envelopes_by_root_request:
+                default_max_execution_payload_envelopes_by_root_request(),
+
+            /*
              * Application specific
              */
             domain_application_mask: APPLICATION_DOMAIN_BUILDER,
@@ -1822,7 +1846,9 @@ pub struct Config {
     #[serde(default = "default_max_request_blob_sidecars_electra")]
     #[serde(with = "serde_utils::quoted_u64")]
     max_request_blob_sidecars_electra: u64,
-
+    #[serde(default = "default_max_request_payloads")]
+    #[serde(with = "serde_utils::quoted_u64")]
+    max_request_payloads: u64,
     #[serde(default = "default_number_of_custody_groups")]
     #[serde(with = "serde_utils::quoted_u64")]
     number_of_custody_groups: u64,
@@ -2004,6 +2030,10 @@ const fn default_maximum_gossip_clock_disparity_millis() -> u64 {
     500
 }
 
+const fn default_max_request_payloads() -> u64 {
+    128
+}
+
 const fn default_custody_requirement() -> u64 {
     4
 }
@@ -2076,6 +2106,18 @@ fn max_data_columns_by_root_request_common<E: EthSpec>(max_request_blocks: u64) 
     .len()
 }
 
+fn max_execution_payload_envelopes_by_root_request_common(max_request_payloads: u64) -> usize {
+    let max_request_payloads = max_request_payloads as usize;
+
+    RuntimeVariableList::<Hash256>::new(
+        vec![Hash256::zero(); max_request_payloads],
+        max_request_payloads,
+    )
+    .expect("creating a RuntimeVariableList of size `max_request_payloads` should succeed")
+    .as_ssz_bytes()
+    .len()
+}
+
 fn default_max_blocks_by_root_request() -> usize {
     max_blocks_by_root_request_common(default_max_request_blocks())
 }
@@ -2090,6 +2132,10 @@ fn default_max_blobs_by_root_request() -> usize {
 
 fn default_data_columns_by_root_request() -> usize {
     max_data_columns_by_root_request_common::<MainnetEthSpec>(default_max_request_blocks_deneb())
+}
+
+fn default_max_execution_payload_envelopes_by_root_request() -> usize {
+    max_execution_payload_envelopes_by_root_request_common(default_max_request_payloads())
 }
 
 impl Default for Config {
@@ -2248,6 +2294,7 @@ impl Config {
             balance_per_additional_custody_group: spec.balance_per_additional_custody_group,
             min_epochs_for_data_column_sidecars_requests: spec
                 .min_epochs_for_data_column_sidecars_requests,
+            max_request_payloads: spec.max_request_payloads,
         }
     }
 
@@ -2316,6 +2363,7 @@ impl Config {
             max_request_blocks_deneb,
             max_request_blob_sidecars,
             max_request_data_column_sidecars,
+            max_request_payloads,
             min_epochs_for_blob_sidecars_requests,
             blob_sidecar_subnet_count,
             max_blobs_per_block,
@@ -2389,6 +2437,7 @@ impl Config {
             message_domain_valid_snappy,
             attestation_subnet_prefix_bits,
             max_request_blocks,
+            max_request_payloads,
             attestation_propagation_slot_range,
             maximum_gossip_clock_disparity_millis,
             max_request_blocks_deneb,
@@ -2413,6 +2462,8 @@ impl Config {
             max_data_columns_by_root_request: max_data_columns_by_root_request_common::<E>(
                 max_request_blocks_deneb,
             ),
+            max_execution_payload_envelopes_by_root_request:
+                max_execution_payload_envelopes_by_root_request_common(max_request_payloads),
 
             number_of_custody_groups,
             data_column_sidecar_subnet_count,

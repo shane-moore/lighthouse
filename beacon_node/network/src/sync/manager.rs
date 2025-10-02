@@ -38,8 +38,8 @@ use super::block_lookups::BlockLookups;
 use super::network_context::{
     CustodyByRootResult, RangeBlockComponent, RangeRequestId, RpcEvent, SyncNetworkContext,
 };
-use super::peer_sync_info::{PeerSyncType, remote_sync_type};
-use super::range_sync::{EPOCHS_PER_BATCH, RangeSync, RangeSyncType};
+use super::peer_sync_info::{remote_sync_type, PeerSyncType};
+use super::range_sync::{RangeSync, RangeSyncType, EPOCHS_PER_BATCH};
 use crate::network_beacon_processor::{ChainSegmentProcessId, NetworkBeaconProcessor};
 use crate::service::NetworkMessage;
 use crate::status::ToStatusMessage;
@@ -53,14 +53,15 @@ use beacon_chain::{
     AvailabilityProcessingStatus, BeaconChain, BeaconChainTypes, BlockError, EngineState,
 };
 use futures::StreamExt;
-use lighthouse_network::SyncInfo;
 use lighthouse_network::rpc::RPCError;
 use lighthouse_network::service::api_types::{
     BlobsByRangeRequestId, BlocksByRangeRequestId, ComponentsByRangeRequestId, CustodyRequester,
     DataColumnsByRangeRequestId, DataColumnsByRootRequestId, DataColumnsByRootRequester,
-    ExecutionPayloadEnvelopesByRangeRequestId, Id, SingleLookupReqId, SyncRequestId,
+    ExecutionPayloadEnvelopesByRangeRequestId, ExecutionPayloadEnvelopesByRootRequestId, Id,
+    SingleLookupReqId, SyncRequestId,
 };
 use lighthouse_network::types::{NetworkGlobals, SyncState};
+use lighthouse_network::SyncInfo;
 use lighthouse_network::{PeerAction, PeerId};
 use logging::crit;
 use lru_cache::LRUTimeCache;
@@ -487,6 +488,12 @@ impl<T: BeaconChainTypes> SyncManager<T> {
             }
             SyncRequestId::ExecutionPayloadEnvelopesByRange(req_id) => self
                 .on_execution_payload_envelopes_by_range_response(
+                    req_id,
+                    peer_id,
+                    RpcEvent::RPCError(error),
+                ),
+            SyncRequestId::ExecutionPayloadEnvelopesByRoot(req_id) => self
+                .on_execution_payload_envelopes_by_root_response(
                     req_id,
                     peer_id,
                     RpcEvent::RPCError(error),
@@ -1131,6 +1138,12 @@ impl<T: BeaconChainTypes> SyncManager<T> {
                     peer_id,
                     RpcEvent::from_chunk(envelope, seen_timestamp),
                 ),
+            SyncRequestId::ExecutionPayloadEnvelopesByRoot(id) => self
+                .on_execution_payload_envelopes_by_root_response(
+                    id,
+                    peer_id,
+                    RpcEvent::from_chunk(envelope, seen_timestamp),
+                ),
             _ => {
                 crit!(%peer_id, "bad request id for execution payload envelope");
             }
@@ -1144,6 +1157,15 @@ impl<T: BeaconChainTypes> SyncManager<T> {
         _envelope: RpcEvent<Arc<types::SignedExecutionPayloadEnvelope<T::EthSpec>>>,
     ) {
         todo!("TODO(EIP-7732): Handle envelopes for range and backfill sync.")
+    }
+
+    fn on_execution_payload_envelopes_by_root_response(
+        &mut self,
+        _id: ExecutionPayloadEnvelopesByRootRequestId,
+        _peer_id: PeerId,
+        _envelope: RpcEvent<Arc<types::SignedExecutionPayloadEnvelope<T::EthSpec>>>,
+    ) {
+        todo!("TODO(EIP-7732): Handle execution payload envelope by root responses.")
     }
 
     fn on_single_blob_response(

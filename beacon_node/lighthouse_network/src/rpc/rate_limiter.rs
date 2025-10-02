@@ -107,6 +107,8 @@ pub struct RPCRateLimiter {
     dcbrange_rl: Limiter<PeerId>,
     /// ExecutionPayloadEnvelopesByRange rate limiter.
     execution_payload_envelopes_by_range_rl: Limiter<PeerId>,
+    /// ExecutionPayloadEnvelopesByRoot rate limiter.
+    execution_payload_envelopes_by_root_rl: Limiter<PeerId>,
     /// LightClientBootstrap rate limiter.
     lc_bootstrap_rl: Limiter<PeerId>,
     /// LightClientOptimisticUpdate rate limiter.
@@ -152,6 +154,8 @@ pub struct RPCRateLimiterBuilder {
     dcbrange_quota: Option<Quota>,
     /// Quota for the ExecutionPayloadEnvelopesByRange protocol.
     execution_payload_envelopes_by_range_quota: Option<Quota>,
+    /// Quota for the ExecutionPayloadEnvelopesByRoot protocol.
+    execution_payload_envelopes_by_root_quota: Option<Quota>,
     /// Quota for the LightClientBootstrap protocol.
     lcbootstrap_quota: Option<Quota>,
     /// Quota for the LightClientOptimisticUpdate protocol.
@@ -179,6 +183,9 @@ impl RPCRateLimiterBuilder {
             Protocol::DataColumnsByRange => self.dcbrange_quota = q,
             Protocol::ExecutionPayloadEnvelopesByRange => {
                 self.execution_payload_envelopes_by_range_quota = q
+            }
+            Protocol::ExecutionPayloadEnvelopesByRoot => {
+                self.execution_payload_envelopes_by_root_quota = q
             }
             Protocol::LightClientBootstrap => self.lcbootstrap_quota = q,
             Protocol::LightClientOptimisticUpdate => self.lc_optimistic_update_quota = q,
@@ -215,6 +222,9 @@ impl RPCRateLimiterBuilder {
         let execution_payload_envelopes_by_range_quota = self
             .execution_payload_envelopes_by_range_quota
             .ok_or("ExecutionPayloadEnvelopesByRange quota not specified")?;
+        let execution_payload_envelopes_by_root_quota = self
+            .execution_payload_envelopes_by_root_quota
+            .ok_or("ExecutionPayloadEnvelopesByRoot quota not specified")?;
 
         let blbrange_quota = self
             .blbrange_quota
@@ -248,6 +258,8 @@ impl RPCRateLimiterBuilder {
         let lc_updates_by_range_rl = Limiter::from_quota(lc_updates_by_range_quota)?;
         let execution_payload_envelopes_by_range_rl =
             Limiter::from_quota(execution_payload_envelopes_by_range_quota)?;
+        let execution_payload_envelopes_by_root_rl =
+            Limiter::from_quota(execution_payload_envelopes_by_root_quota)?;
 
         // check for peers to prune every 30 seconds, starting in 30 seconds
         let prune_every = tokio::time::Duration::from_secs(30);
@@ -272,6 +284,7 @@ impl RPCRateLimiterBuilder {
             lc_finality_update_rl,
             lc_updates_by_range_rl,
             execution_payload_envelopes_by_range_rl,
+            execution_payload_envelopes_by_root_rl,
             init_time: Instant::now(),
             fork_context,
         })
@@ -326,6 +339,7 @@ impl RPCRateLimiter {
             light_client_finality_update_quota,
             light_client_updates_by_range_quota,
             execution_payload_envelopes_by_range_quota,
+            execution_payload_envelopes_by_root_quota,
         } = config;
 
         Self::builder()
@@ -342,6 +356,10 @@ impl RPCRateLimiter {
             .set_quota(
                 Protocol::ExecutionPayloadEnvelopesByRange,
                 execution_payload_envelopes_by_range_quota,
+            )
+            .set_quota(
+                Protocol::ExecutionPayloadEnvelopesByRoot,
+                execution_payload_envelopes_by_root_quota,
             )
             .set_quota(Protocol::LightClientBootstrap, light_client_bootstrap_quota)
             .set_quota(
@@ -392,6 +410,9 @@ impl RPCRateLimiter {
             Protocol::DataColumnsByRange => &mut self.dcbrange_rl,
             Protocol::ExecutionPayloadEnvelopesByRange => {
                 &mut self.execution_payload_envelopes_by_range_rl
+            }
+            Protocol::ExecutionPayloadEnvelopesByRoot => {
+                &mut self.execution_payload_envelopes_by_root_rl
             }
             Protocol::LightClientBootstrap => &mut self.lc_bootstrap_rl,
             Protocol::LightClientOptimisticUpdate => &mut self.lc_optimistic_update_rl,
