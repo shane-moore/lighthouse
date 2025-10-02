@@ -82,6 +82,7 @@ impl<E: EthSpec> SSZSnappyInboundCodec<E> {
                 RpcSuccessResponse::DataColumnsByRoot(res) => res.as_ssz_bytes(),
                 RpcSuccessResponse::DataColumnsByRange(res) => res.as_ssz_bytes(),
                 RpcSuccessResponse::ExecutionPayloadEnvelopesByRange(res) => res.as_ssz_bytes(),
+                RpcSuccessResponse::ExecutionPayloadEnvelopesByRoot(res) => res.as_ssz_bytes(),
                 RpcSuccessResponse::LightClientBootstrap(res) => res.as_ssz_bytes(),
                 RpcSuccessResponse::LightClientOptimisticUpdate(res) => res.as_ssz_bytes(),
                 RpcSuccessResponse::LightClientFinalityUpdate(res) => res.as_ssz_bytes(),
@@ -363,6 +364,7 @@ impl<E: EthSpec> Encoder<RequestType<E>> for SSZSnappyOutboundCodec<E> {
             RequestType::DataColumnsByRange(req) => req.as_ssz_bytes(),
             RequestType::DataColumnsByRoot(req) => req.data_column_ids.as_ssz_bytes(),
             RequestType::ExecutionPayloadEnvelopesByRange(req) => req.as_ssz_bytes(),
+            RequestType::ExecutionPayloadEnvelopesByRoot(req) => req.block_roots.as_ssz_bytes(),
             RequestType::Ping(req) => req.as_ssz_bytes(),
             RequestType::LightClientBootstrap(req) => req.as_ssz_bytes(),
             RequestType::LightClientUpdatesByRange(req) => req.as_ssz_bytes(),
@@ -576,6 +578,14 @@ fn handle_rpc_request<E: EthSpec>(
                 ExecutionPayloadEnvelopesByRangeRequest::from_ssz_bytes(decoded_buffer)?,
             )))
         }
+        SupportedProtocol::ExecutionPayloadEnvelopesByRootV1 => Ok(Some(
+            RequestType::ExecutionPayloadEnvelopesByRoot(ExecutionPayloadEnvelopesByRootRequest {
+                block_roots: <RuntimeVariableList<Hash256>>::from_ssz_bytes(
+                    decoded_buffer,
+                    spec.max_request_payloads as usize,
+                )?,
+            }),
+        )),
         SupportedProtocol::PingV1 => Ok(Some(RequestType::Ping(Ping {
             data: u64::from_ssz_bytes(decoded_buffer)?,
         }))),
@@ -751,6 +761,29 @@ fn handle_rpc_response<E: EthSpec>(
                     Err(RPCError::ErrorResponse(
                         RpcErrorResponse::InvalidRequest,
                         "Invalid fork name for execution payload envelopes by range".to_string(),
+                    ))
+                }
+            }
+            None => Err(RPCError::ErrorResponse(
+                RpcErrorResponse::InvalidRequest,
+                format!(
+                    "No context bytes provided for {:?} response",
+                    versioned_protocol
+                ),
+            )),
+        },
+        SupportedProtocol::ExecutionPayloadEnvelopesByRootV1 => match fork_name {
+            Some(fork_name) => {
+                if fork_name.gloas_enabled() {
+                    Ok(Some(RpcSuccessResponse::ExecutionPayloadEnvelopesByRoot(
+                        Arc::new(SignedExecutionPayloadEnvelope::Gloas(
+                            SignedExecutionPayloadEnvelopeGloas::from_ssz_bytes(decoded_buffer)?,
+                        )),
+                    )))
+                } else {
+                    Err(RPCError::ErrorResponse(
+                        RpcErrorResponse::InvalidRequest,
+                        "Invalid fork name for execution payload envelopes by root".to_string(),
                     ))
                 }
             }

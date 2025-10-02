@@ -33,6 +33,8 @@ pub enum SyncRequestId {
     DataColumnsByRange(DataColumnsByRangeRequestId),
     /// Execution payload envelopes by range request
     ExecutionPayloadEnvelopesByRange(ExecutionPayloadEnvelopesByRangeRequestId),
+    /// Execution payload envelopes by root request
+    ExecutionPayloadEnvelopesByRoot(ExecutionPayloadEnvelopesByRootRequestId),
 }
 
 /// Request ID for data_columns_by_root requests. Block lookups do not issue this request directly.
@@ -78,6 +80,12 @@ pub struct ExecutionPayloadEnvelopesByRangeRequestId {
     pub id: Id,
     /// The Id of the overall By Range request for block components.
     pub parent_request_id: ComponentsByRangeRequestId,
+}
+
+#[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
+pub struct ExecutionPayloadEnvelopesByRootRequestId {
+    /// Id to identify this attempt at an execution_payload_envelopes_by_root request
+    pub id: Id,
 }
 
 /// Block components by range request for range sync. Includes an ID for downstream consumers to
@@ -153,6 +161,8 @@ pub enum Response<E: EthSpec> {
     DataColumnsByRoot(Option<Arc<DataColumnSidecar<E>>>),
     /// A response to a ExecutionPayloadEnvelopesByRange request.
     ExecutionPayloadEnvelopesByRange(Option<Arc<SignedExecutionPayloadEnvelope<E>>>),
+    /// A response to a ExecutionPayloadEnvelopesByRoot request.
+    ExecutionPayloadEnvelopesByRoot(Option<Arc<SignedExecutionPayloadEnvelope<E>>>),
     /// A response to a LightClientUpdate request.
     LightClientBootstrap(Arc<LightClientBootstrap<E>>),
     /// A response to a LightClientOptimisticUpdate request.
@@ -198,6 +208,14 @@ impl<E: EthSpec> std::convert::From<Response<E>> for RpcResponse<E> {
                     ResponseTermination::ExecutionPayloadEnvelopesByRange,
                 ),
             },
+            Response::ExecutionPayloadEnvelopesByRoot(r) => match r {
+                Some(envelope) => RpcResponse::Success(
+                    RpcSuccessResponse::ExecutionPayloadEnvelopesByRoot(envelope),
+                ),
+                None => RpcResponse::StreamTermination(
+                    ResponseTermination::ExecutionPayloadEnvelopesByRoot,
+                ),
+            },
             Response::Status(s) => RpcResponse::Success(RpcSuccessResponse::Status(s)),
             Response::LightClientBootstrap(b) => {
                 RpcResponse::Success(RpcSuccessResponse::LightClientBootstrap(b))
@@ -240,6 +258,7 @@ impl_display!(
     id,
     parent_request_id
 );
+impl_display!(ExecutionPayloadEnvelopesByRootRequestId, "{}", id);
 impl_display!(ComponentsByRangeRequestId, "{}/{}", id, requester);
 impl_display!(DataColumnsByRootRequestId, "{}/{}", id, requester);
 impl_display!(SingleLookupReqId, "{}/Lookup/{}", req_id, lookup_id);
