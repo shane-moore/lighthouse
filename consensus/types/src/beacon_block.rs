@@ -681,6 +681,100 @@ impl<E: EthSpec, Payload: AbstractExecPayload<E>> EmptyBlock for BeaconBlockGloa
     }
 }
 
+impl<E: EthSpec, Payload: AbstractExecPayload<E>> BeaconBlockGloas<E, Payload> {
+    /// Return a Gloas block where the block has maximum size.
+    pub fn full(spec: &ChainSpec) -> Self {
+        let altair_block: BeaconBlockAltair<_, Payload> = BeaconBlockAltair::full(spec);
+
+        // Create max-sized attester_slashings (Electra type for Gloas)
+        let indexed_attestation = IndexedAttestationElectra {
+            attesting_indices: VariableList::new(vec![
+                0_u64;
+                E::MaxValidatorsPerCommittee::to_usize()
+            ])
+            .unwrap(),
+            data: AttestationData::default(),
+            signature: AggregateSignature::empty(),
+        };
+        let attester_slashing = AttesterSlashingElectra {
+            attestation_1: indexed_attestation.clone(),
+            attestation_2: indexed_attestation,
+        };
+        let attester_slashings = VariableList::new(vec![
+            attester_slashing;
+            E::MaxAttesterSlashingsElectra::to_usize()
+        ])
+        .unwrap();
+
+        // Create max-sized attestations (Electra type for Gloas)
+        let attestation = AttestationElectra {
+            aggregation_bits: BitList::with_capacity(E::MaxValidatorsPerSlot::to_usize()).unwrap(),
+            data: AttestationData::default(),
+            signature: AggregateSignature::empty(),
+            committee_bits: BitVector::default(),
+        };
+        let attestations =
+            VariableList::new(vec![attestation; E::MaxAttestationsElectra::to_usize()]).unwrap();
+
+        // Create max-sized bls_to_execution_changes
+        let bls_change = SignedBlsToExecutionChange {
+            message: BlsToExecutionChange {
+                validator_index: 0,
+                from_bls_pubkey: PublicKeyBytes::empty(),
+                to_execution_address: Address::zero(),
+            },
+            signature: Signature::empty(),
+        };
+        let bls_to_execution_changes =
+            VariableList::new(vec![bls_change; E::MaxBlsToExecutionChanges::to_usize()]).unwrap();
+
+        // Create max-sized payload_attestations
+        let payload_attestation = PayloadAttestation {
+            aggregation_bits: BitList::with_capacity(E::PTCSize::to_usize()).unwrap(),
+            data: PayloadAttestationData {
+                beacon_block_root: Hash256::zero(),
+                slot: spec
+                    .gloas_fork_epoch
+                    .expect("gloas enabled")
+                    .start_slot(E::slots_per_epoch()),
+                payload_present: false,
+                blob_data_available: false,
+            },
+            signature: AggregateSignature::empty(),
+        };
+        let payload_attestations = VariableList::new(vec![
+            payload_attestation;
+            E::MaxPayloadAttestations::to_usize()
+        ])
+        .unwrap();
+
+        BeaconBlockGloas {
+            slot: spec
+                .gloas_fork_epoch
+                .expect("gloas enabled")
+                .start_slot(E::slots_per_epoch()),
+            proposer_index: 0,
+            parent_root: Hash256::zero(),
+            state_root: Hash256::zero(),
+            body: BeaconBlockBodyGloas {
+                randao_reveal: altair_block.body.randao_reveal,
+                eth1_data: altair_block.body.eth1_data,
+                graffiti: altair_block.body.graffiti,
+                proposer_slashings: altair_block.body.proposer_slashings,
+                attester_slashings,
+                attestations,
+                deposits: altair_block.body.deposits,
+                voluntary_exits: altair_block.body.voluntary_exits,
+                sync_aggregate: altair_block.body.sync_aggregate,
+                bls_to_execution_changes,
+                signed_execution_bid: SignedExecutionBid::empty(),
+                payload_attestations,
+                _phantom: PhantomData,
+            },
+        }
+    }
+}
+
 // TODO(EIP-7732) Mark's branch had the following implementation but not sure if it's needed so will just add header below for reference
 // impl<E: EthSpec, Payload: AbstractExecPayload<E>> BeaconBlockEIP7732<E, Payload> {
 

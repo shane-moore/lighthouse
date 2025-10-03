@@ -38,8 +38,8 @@ use super::block_lookups::BlockLookups;
 use super::network_context::{
     CustodyByRootResult, RangeBlockComponent, RangeRequestId, RpcEvent, SyncNetworkContext,
 };
-use super::peer_sync_info::{remote_sync_type, PeerSyncType};
-use super::range_sync::{RangeSync, RangeSyncType, EPOCHS_PER_BATCH};
+use super::peer_sync_info::{PeerSyncType, remote_sync_type};
+use super::range_sync::{EPOCHS_PER_BATCH, RangeSync, RangeSyncType};
 use crate::network_beacon_processor::{ChainSegmentProcessId, NetworkBeaconProcessor};
 use crate::service::NetworkMessage;
 use crate::status::ToStatusMessage;
@@ -53,6 +53,7 @@ use beacon_chain::{
     AvailabilityProcessingStatus, BeaconChain, BeaconChainTypes, BlockError, EngineState,
 };
 use futures::StreamExt;
+use lighthouse_network::SyncInfo;
 use lighthouse_network::rpc::RPCError;
 use lighthouse_network::service::api_types::{
     BlobsByRangeRequestId, BlocksByRangeRequestId, ComponentsByRangeRequestId, CustodyRequester,
@@ -61,7 +62,6 @@ use lighthouse_network::service::api_types::{
     SingleLookupReqId, SyncRequestId,
 };
 use lighthouse_network::types::{NetworkGlobals, SyncState};
-use lighthouse_network::SyncInfo;
 use lighthouse_network::{PeerAction, PeerId};
 use logging::crit;
 use lru_cache::LRUTimeCache;
@@ -1272,6 +1272,14 @@ impl<T: BeaconChainTypes> SyncManager<T> {
 
     /// Handles receiving a response for a range sync request that should have both blocks and
     /// blobs.
+    // TODO(EIP-7732): This aggregation and processing flow will need significant refactoring for ePBS.
+    // Currently we aggregate blocks + blobs/data_columns, then send for processing together.
+    // With ePBS, we'll need to:
+    // - Handle envelope responses in addition to blocks
+    // - Coordinate envelope availability with block processing
+    // - Update batch processing to validate blocks independently of envelopes
+    // - Modify the processing pipeline to handle partial availability (block without envelope)
+    // This refactor should happen after block validation and envelope validation logic is complete.
     fn on_range_components_response(
         &mut self,
         range_request_id: ComponentsByRangeRequestId,
@@ -1286,6 +1294,9 @@ impl<T: BeaconChainTypes> SyncManager<T> {
                 Ok(blocks) => {
                     match range_request_id.requester {
                         RangeRequestId::RangeSync { chain_id, batch_id } => {
+                            // TODO(EIP-7732): Range sync batch processing will need to handle envelope requests/responses.
+                            // May need to request envelopes separately or in parallel with blocks, then coordinate their
+                            // arrival before processing. Consider if we process blocks optimistically or wait for envelopes.
                             self.range_sync.blocks_by_range_response(
                                 &mut self.network,
                                 peer_id,
@@ -1297,6 +1308,8 @@ impl<T: BeaconChainTypes> SyncManager<T> {
                             self.update_sync_state();
                         }
                         RangeRequestId::BackfillSync { batch_id } => {
+                            // TODO(EIP-7732): Backfill sync may need envelope handling for Gloas blocks.
+                            // Consider if backfill requires envelopes or can proceed without them.
                             match self.backfill_sync.on_block_response(
                                 &mut self.network,
                                 batch_id,

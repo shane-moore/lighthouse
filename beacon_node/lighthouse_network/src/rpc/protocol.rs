@@ -17,10 +17,10 @@ use tokio_util::{
     compat::{Compat, FuturesAsyncReadCompatExt},
 };
 use types::{
-    BeaconBlock, BeaconBlockAltair, BeaconBlockBase, BlobSidecar, ChainSpec, DataColumnSidecar,
-    EmptyBlock, Epoch, EthSpec, EthSpecId, ExecutionPayloadEnvelope, ForkContext, ForkName,
-    LightClientBootstrap, LightClientBootstrapAltair, LightClientFinalityUpdate,
-    LightClientFinalityUpdateAltair, LightClientOptimisticUpdate,
+    BeaconBlock, BeaconBlockAltair, BeaconBlockBase, BeaconBlockGloas, BlobSidecar, ChainSpec,
+    DataColumnSidecar, EmptyBlock, Epoch, EthSpec, EthSpecId, ExecutionPayloadEnvelope,
+    ForkContext, ForkName, LightClientBootstrap, LightClientBootstrapAltair,
+    LightClientFinalityUpdate, LightClientFinalityUpdateAltair, LightClientOptimisticUpdate,
     LightClientOptimisticUpdateAltair, LightClientUpdate, MainnetEthSpec, MinimalEthSpec,
     Signature, SignedBeaconBlock, SignedExecutionPayloadEnvelope,
 };
@@ -49,6 +49,26 @@ pub static SIGNED_BEACON_BLOCK_BASE_MAX: LazyLock<usize> = LazyLock::new(|| {
 pub static SIGNED_BEACON_BLOCK_ALTAIR_MAX: LazyLock<usize> = LazyLock::new(|| {
     SignedBeaconBlock::<MainnetEthSpec>::from_block(
         BeaconBlock::Altair(BeaconBlockAltair::full(&MainnetEthSpec::default_spec())),
+        Signature::empty(),
+    )
+    .as_ssz_bytes()
+    .len()
+});
+
+pub static SIGNED_BEACON_BLOCK_GLOAS_MIN: LazyLock<usize> = LazyLock::new(|| {
+    SignedBeaconBlock::<MainnetEthSpec>::from_block(
+        BeaconBlock::Gloas(BeaconBlockGloas::<MainnetEthSpec>::empty(
+            &MainnetEthSpec::default_spec(),
+        )),
+        Signature::empty(),
+    )
+    .as_ssz_bytes()
+    .len()
+});
+
+pub static SIGNED_BEACON_BLOCK_GLOAS_MAX: LazyLock<usize> = LazyLock::new(|| {
+    SignedBeaconBlock::<MainnetEthSpec>::from_block(
+        BeaconBlock::Gloas(BeaconBlockGloas::full(&MainnetEthSpec::default_spec())),
         Signature::empty(),
     )
     .as_ssz_bytes()
@@ -150,6 +170,10 @@ pub fn rpc_block_limits_by_fork(current_fork: ForkName) -> RpcLimits {
         ForkName::Altair => RpcLimits::new(
             *SIGNED_BEACON_BLOCK_BASE_MIN, // Base block is smaller than altair blocks
             *SIGNED_BEACON_BLOCK_ALTAIR_MAX, // Altair block is larger than base blocks
+        ),
+        ForkName::Gloas => RpcLimits::new(
+            *SIGNED_BEACON_BLOCK_GLOAS_MIN, // Gloas blocks don't have execution payload, so they're much smaller
+            *SIGNED_BEACON_BLOCK_GLOAS_MAX, // Gloas blocks are smaller than Bellatrix+ blocks
         ),
         // After the merge the max SSZ size of a block is absurdly big. The size is actually
         // bound by other constants, so here we default to the bellatrix's max value
