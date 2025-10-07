@@ -360,7 +360,7 @@ where
     ))
 }
 
-pub fn execution_bid_signature_set<'a, E, F>(
+pub fn execution_payload_bid_signature_set<'a, E, F>(
     state: &'a BeaconState<E>,
     get_pubkey: F,
     signed_execution_payload_bid: &'a SignedExecutionPayloadBid,
@@ -376,10 +376,10 @@ where
         &state.fork(),
         state.genesis_validators_root(),
     );
-    let execution_bid = &signed_execution_payload_bid.message;
-    let pubkey = get_pubkey(execution_bid.builder_index as usize)
-        .ok_or(Error::ValidatorUnknown(execution_bid.builder_index))?;
-    let message = execution_bid.signing_root(domain);
+    let execution_payload_bid = &signed_execution_payload_bid.message;
+    let pubkey = get_pubkey(execution_payload_bid.builder_index as usize)
+        .ok_or(Error::ValidatorUnknown(execution_payload_bid.builder_index))?;
+    let message = execution_payload_bid.signing_root(domain);
 
     Ok(SignatureSet::single_pubkey(
         &signed_execution_payload_bid.signature,
