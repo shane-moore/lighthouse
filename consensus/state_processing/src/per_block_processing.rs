@@ -4,7 +4,7 @@ use errors::{BlockOperationError, BlockProcessingError, HeaderInvalid};
 use rayon::prelude::*;
 use safe_arith::{ArithError, SafeArith, SafeArithIter};
 use signature_sets::{
-    block_proposal_signature_set, execution_bid_signature_set, get_pubkey_from_state,
+    block_proposal_signature_set, execution_payload_bid_signature_set, get_pubkey_from_state,
     randao_signature_set,
 };
 use std::borrow::Cow;
@@ -177,8 +177,8 @@ pub fn per_block_processing<E: EthSpec, Payload: AbstractExecPayload<E>>(
         let body = block.body();
         if state.fork_name_unchecked().gloas_enabled() {
             process_withdrawals::gloas::process_withdrawals::<E>(state, spec)?;
-            // TODO(EIP-7732) Mark had process_execution_bid above process_randao so need to clarify if makes more sense here or there
-            process_execution_bid(state, block, verify_signatures, spec)?;
+            // TODO(EIP-7732) Mark had process_execution_payload_bid above process_randao so need to clarify if makes more sense here or there
+            process_execution_payload_bid(state, block, verify_signatures, spec)?;
         } else {
             process_withdrawals::capella::process_withdrawals::<E, Payload>(
                 state,
@@ -693,7 +693,7 @@ pub fn get_expected_withdrawals<E: EthSpec>(
     ))
 }
 
-pub fn process_execution_bid<E: EthSpec, Payload: AbstractExecPayload<E>>(
+pub fn process_execution_payload_bid<E: EthSpec, Payload: AbstractExecPayload<E>>(
     state: &mut BeaconState<E>,
     block: BeaconBlockRef<'_, E, Payload>,
     verify_signatures: VerifySignatures,
@@ -702,22 +702,38 @@ pub fn process_execution_bid<E: EthSpec, Payload: AbstractExecPayload<E>>(
     // Verify the bid signature
     let signed_bid = block.body().signed_execution_payload_bid()?;
 
-    if verify_signatures.is_true() {
-        block_verify!(
-            execution_bid_signature_set(
-                state,
-                |i| get_pubkey_from_state(state, i),
-                signed_bid,
-                spec
-            )?
-            .verify(),
-            ExecutionPayloadBidInvalid::BadSignature.into()
-        );
-    }
-
     let bid = &signed_bid.message;
+    let amount = bid.value;
     let builder_index = bid.builder_index;
     let builder = state.get_validator(builder_index as usize)?;
+
+    // For self-builds, amount must be zero regardless of withdrawal credential prefix
+    if builder_index == block.proposer_index() {
+        block_verify!(amount == 0, ExecutionPayloadBidInvalid::BadAmount.into());
+        // TODO(EIP-7732): check with team if we should use ExecutionPayloadBidInvalid::BadSignature or a new error variant for this, like BadSelfBuildSignature
+        block_verify!(
+            signed_bid.signature.is_infinity(),
+            ExecutionPayloadBidInvalid::BadSignature.into()
+        );
+    } else {
+        // Non-self builds require builder withdrawal credential
+        block_verify!(
+            builder.has_builder_withdrawal_credential(spec),
+            ExecutionPayloadBidInvalid::BadWithdrawalCredentials.into()
+        );
+        if verify_signatures.is_true() {
+            block_verify!(
+                execution_payload_bid_signature_set(
+                    state,
+                    |i| get_pubkey_from_state(state, i),
+                    signed_bid,
+                    spec
+                )?
+                .verify(),
+                ExecutionPayloadBidInvalid::BadSignature.into()
+            );
+        }
+    }
 
     // Verify builder is active and not slashed
     block_verify!(
@@ -728,19 +744,6 @@ pub fn process_execution_bid<E: EthSpec, Payload: AbstractExecPayload<E>>(
         !builder.slashed,
         ExecutionPayloadBidInvalid::BuilderSlashed(builder_index).into()
     );
-
-    let amount = bid.value;
-
-    // For self-builds, amount must be zero regardless of withdrawal credential prefix
-    if builder_index == block.proposer_index() {
-        block_verify!(amount == 0, ExecutionPayloadBidInvalid::BadAmount.into());
-    } else {
-        // Non-self builds require builder withdrawal credential
-        block_verify!(
-            builder.has_builder_withdrawal_credential(spec),
-            ExecutionPayloadBidInvalid::BadWithdrawalCredentials.into()
-        );
-    }
 
     // Check that the builder is active, non-slashed, and has funds to cover the bid
     let pending_payments = state
