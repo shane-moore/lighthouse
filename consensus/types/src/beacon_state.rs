@@ -1099,7 +1099,7 @@ impl<E: EthSpec> BeaconState<E> {
 
                 if self.fork_name_unchecked().gloas_enabled() {
                     self.compute_balance_weighted_selection(indices, &seed, 1, true, spec)?
-                        .get(0)
+                        .first()
                         .copied()
                         .ok_or(Error::InsufficientValidators)
                 } else {
@@ -1344,6 +1344,7 @@ impl<E: EthSpec> BeaconState<E> {
     /// Compute the sync committee indices for the next sync committee.
     fn get_next_sync_committee_indices(&self, spec: &ChainSpec) -> Result<Vec<usize>, Error> {
         let epoch = self.current_epoch().safe_add(1)?;
+
         let active_validator_indices = self.get_active_validator_indices(epoch, spec)?;
         let seed = self.get_seed(epoch, Domain::SyncCommittee, spec)?;
 
@@ -2838,8 +2839,6 @@ impl<E: EthSpec> BeaconState<E> {
     ///
     /// If shuffle_indices is True, candidate indices are themselves sampled from indices
     /// by shuffling it, otherwise indices is traversed in order.
-    ///
-    /// Spec: compute_balance_weighted_selection helper
     fn compute_balance_weighted_selection(
         &self,
         indices: &[usize],
@@ -2857,7 +2856,7 @@ impl<E: EthSpec> BeaconState<E> {
         let mut count = 0usize;
 
         while selected.len() < size {
-            let mut next_index = count % total;
+            let mut next_index = count.safe_rem(total)?;
 
             if shuffle_indices {
                 next_index =
@@ -2871,7 +2870,7 @@ impl<E: EthSpec> BeaconState<E> {
                 selected.push(*candidate_index);
             }
 
-            count += 1;
+            count.safe_add_assign(1)?;
         }
 
         Ok(selected)
@@ -2898,7 +2897,8 @@ impl<E: EthSpec> BeaconState<E> {
             MAX_RANDOM_BYTE
         };
 
-        Ok(effective_balance * max_random_value >= max_effective_balance * random_value)
+        Ok(effective_balance.safe_mul(max_random_value)?
+            >= max_effective_balance.safe_mul(random_value)?)
     }
 }
 

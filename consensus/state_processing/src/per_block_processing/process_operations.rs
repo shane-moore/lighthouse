@@ -799,6 +799,11 @@ pub fn process_consolidation_request<E: EthSpec>(
     Ok(())
 }
 
+// TODO(EIP-7732): Add test cases for `process_payload_attestations` to
+// `consensus/state_processing/src/per_block_processing/tests.rs`.
+// The tests will require being able to build Gloas blocks with PayloadAttestations,
+// which currently fails due to incomplete Gloas block structure as mentioned here
+// https://github.com/sigp/lighthouse/pull/8273
 pub fn process_payload_attestation<E: EthSpec>(
     state: &mut BeaconState<E>,
     payload_attestation: &PayloadAttestation<E>,
