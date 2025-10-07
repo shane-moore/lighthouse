@@ -14,7 +14,7 @@ pub fn is_valid_indexed_payload_attestation<E: EthSpec>(
     verify_signatures: VerifySignatures,
     spec: &ChainSpec,
 ) -> Result<(), BlockOperationError<Invalid>> {
-    // Verify indices are sorted and unique
+    // Verify indices are non-empty and sorted (duplicates allowed)
     let indices = &indexed_payload_attestation.attesting_indices;
     verify!(!indices.is_empty(), Invalid::IndicesEmpty);
     let check_sorted = |list: &[u64]| -> Result<(), BlockOperationError<Invalid>> {
@@ -22,7 +22,7 @@ pub fn is_valid_indexed_payload_attestation<E: EthSpec>(
             .tuple_windows()
             .enumerate()
             .try_for_each(|(i, (x, y))| {
-                if x < y {
+                if x <= y {
                     Ok(())
                 } else {
                     Err(error(Invalid::BadValidatorIndicesOrdering(i)))
