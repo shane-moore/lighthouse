@@ -2,6 +2,7 @@ use super::VerifySignatures;
 use super::errors::{BlockOperationError, PayloadAttestationInvalid as Invalid};
 use crate::ConsensusContext;
 use crate::per_block_processing::is_valid_indexed_payload_attestation;
+use safe_arith::SafeArith;
 use types::*;
 
 pub fn verify_payload_attestation<'ctxt, E: EthSpec>(
@@ -24,7 +25,7 @@ pub fn verify_payload_attestation<'ctxt, E: EthSpec>(
 
     // Check that the attestation is for the previous slot
     verify!(
-        data.slot + 1 == state.slot(),
+        data.slot.safe_add(1)? == state.slot(),
         Invalid::SlotMismatch {
             expected: state.slot().saturating_sub(Slot::new(1)),
             found: data.slot,
@@ -36,7 +37,7 @@ pub fn verify_payload_attestation<'ctxt, E: EthSpec>(
 
     is_valid_indexed_payload_attestation(
         state,
-        &indexed_payload_attestation,
+        indexed_payload_attestation,
         verify_signatures,
         spec,
     )?;
