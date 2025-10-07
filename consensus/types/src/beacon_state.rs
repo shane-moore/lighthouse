@@ -518,7 +518,7 @@ where
     pub latest_execution_payload_header: ExecutionPayloadHeaderFulu<E>,
     #[superstruct(only(Gloas))]
     #[metastruct(exclude_from(tree_lists))]
-    pub latest_execution_bid: ExecutionBid,
+    pub latest_execution_payload_bid: ExecutionPayloadBid,
     #[superstruct(only(Capella, Deneb, Electra, Fulu, Gloas), partial_getter(copy))]
     #[serde(with = "serde_utils::quoted_u64")]
     #[metastruct(exclude_from(tree_lists))]
@@ -2144,7 +2144,7 @@ impl<E: EthSpec> BeaconState<E> {
             | BeaconState::Electra(_)
             | BeaconState::Fulu(_) => true,
             BeaconState::Gloas(state) => {
-                state.latest_execution_bid.block_hash == state.latest_block_hash
+                state.latest_execution_payload_bid.block_hash == state.latest_block_hash
             }
         }
     }

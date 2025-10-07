@@ -116,8 +116,11 @@ where
     )]
     pub latest_execution_payload_header: ExecutionPayloadHeaderFulu<E>,
 
-    #[superstruct(only(Gloas), partial_getter(rename = "latest_execution_bid_gloas"))]
-    pub latest_execution_bid: ExecutionBid,
+    #[superstruct(
+        only(Gloas),
+        partial_getter(rename = "latest_execution_payload_bid_gloas")
+    )]
+    pub latest_execution_payload_bid: ExecutionPayloadBid,
 
     // Capella
     #[superstruct(only(Capella, Deneb, Electra, Fulu, Gloas))]
@@ -480,7 +483,7 @@ impl<E: EthSpec> TryInto<BeaconState<E>> for PartialBeaconState<E> {
                     current_sync_committee,
                     next_sync_committee,
                     inactivity_scores,
-                    latest_execution_bid,
+                    latest_execution_payload_bid,
                     next_withdrawal_index,
                     next_withdrawal_validator_index,
                     deposit_requests_start_index,

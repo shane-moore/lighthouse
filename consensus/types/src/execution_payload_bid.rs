@@ -11,9 +11,8 @@ use tree_hash_derive::TreeHash;
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[derivative(PartialEq, Hash)]
 #[context_deserialize(ForkName)]
-// This is what Potuz' spec calls an `ExecutionPayloadHeader` even though it's clearly a bid.
-// https://github.com/ethereum/consensus-specs/blob/bba2c7be148d6d921d2ca5e1cc528f5daaf456d9/specs/gloas/beacon-chain.md#executionpayloadheader
-pub struct ExecutionBid {
+// https://github.com/ethereum/consensus-specs/blob/master/specs/gloas/beacon-chain.md#executionpayloadbid
+pub struct ExecutionPayloadBid {
     pub parent_block_hash: ExecutionBlockHash,
     pub parent_block_root: Hash256,
     pub block_hash: ExecutionBlockHash,
@@ -29,11 +28,11 @@ pub struct ExecutionBid {
     pub blob_kzg_commitments_root: Hash256,
 }
 
-impl SignedRoot for ExecutionBid {}
+impl SignedRoot for ExecutionPayloadBid {}
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    ssz_and_tree_hash_tests!(ExecutionBid);
+    ssz_and_tree_hash_tests!(ExecutionPayloadBid);
 }

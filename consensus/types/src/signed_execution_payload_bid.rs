@@ -12,16 +12,16 @@ use tree_hash_derive::TreeHash;
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[derivative(PartialEq, Hash)]
 #[context_deserialize(ForkName)]
-// https://github.com/ethereum/consensus-specs/blob/bba2c7be148d6d921d2ca5e1cc528f5daaf456d9/specs/gloas/beacon-chain.md#signedexecutionpayloadheader
-pub struct SignedExecutionBid {
-    pub message: ExecutionBid,
+// https://github.com/ethereum/consensus-specs/blob/master/specs/gloas/beacon-chain.md#signedexecutionpayloadbid
+pub struct SignedExecutionPayloadBid {
+    pub message: ExecutionPayloadBid,
     pub signature: Signature,
 }
 
-impl SignedExecutionBid {
+impl SignedExecutionPayloadBid {
     pub fn empty() -> Self {
         Self {
-            message: ExecutionBid::default(),
+            message: ExecutionPayloadBid::default(),
             signature: Signature::empty(),
         }
     }
@@ -31,5 +31,5 @@ impl SignedExecutionBid {
 mod tests {
     use super::*;
 
-    ssz_and_tree_hash_tests!(SignedExecutionBid);
+    ssz_and_tree_hash_tests!(SignedExecutionPayloadBid);
 }
