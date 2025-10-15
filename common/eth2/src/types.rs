@@ -718,6 +718,13 @@ pub struct BlobIndicesQuery {
 
 #[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct BlobsVersionedHashesQuery {
+    #[serde(default, deserialize_with = "option_query_vec")]
+    pub versioned_hashes: Option<Vec<Hash256>>,
+}
+
+#[derive(Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DataColumnIndicesQuery {
     #[serde(default, deserialize_with = "option_query_vec")]
     pub indices: Option<Vec<u64>>,
@@ -967,6 +974,23 @@ pub struct PeerCount {
     pub disconnecting: u64,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BeaconCommitteeSelection {
+    #[serde(with = "serde_utils::quoted_u64")]
+    pub validator_index: u64,
+    pub slot: Slot,
+    pub selection_proof: Signature,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SyncCommitteeSelection {
+    #[serde(with = "serde_utils::quoted_u64")]
+    pub validator_index: u64,
+    pub slot: Slot,
+    #[serde(with = "serde_utils::quoted_u64")]
+    pub subcommittee_index: u64,
+    pub selection_proof: Signature,
+}
 // --------- Server Sent Event Types -----------
 
 #[derive(PartialEq, Debug, Serialize, Deserialize, Clone)]
@@ -2298,6 +2322,14 @@ pub struct TotalAttestationRewards {
 pub struct StandardAttestationRewards {
     pub ideal_rewards: Vec<IdealAttestationRewards>,
     pub total_rewards: Vec<TotalAttestationRewards>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode)]
+#[serde(bound = "E: EthSpec")]
+#[serde(transparent)]
+pub struct BlobWrapper<E: EthSpec> {
+    #[serde(with = "ssz_types::serde_utils::hex_fixed_vec")]
+    pub blob: Blob<E>,
 }
 
 #[cfg(test)]
