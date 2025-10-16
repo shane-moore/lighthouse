@@ -4,7 +4,6 @@ use beacon_block_body::KzgCommitments;
 use derivative::Derivative;
 use serde::de::{Deserializer, Error as _};
 use serde::{Deserialize, Serialize};
-use ssz::{Decode, DecodeError};
 use ssz_derive::{Decode, Encode};
 use superstruct::superstruct;
 use test_random_derive::TestRandom;
@@ -68,19 +67,6 @@ impl<'a, E: EthSpec> ExecutionPayloadEnvelopeRef<'a, E> {
         match self {
             Self::Gloas(envelope) => ExecutionPayloadRef::Gloas(&envelope.payload),
             Self::NextFork(envelope) => ExecutionPayloadRef::Gloas(&envelope.payload),
-        }
-    }
-}
-
-impl<E: EthSpec> ExecutionPayloadEnvelope<E> {
-    /// Custom SSZ decoder that takes a `ForkName` as context.
-    pub fn from_ssz_bytes_for_fork(bytes: &[u8], fork_name: ForkName) -> Result<Self, DecodeError> {
-        match fork_name {
-            ForkName::Gloas => ExecutionPayloadEnvelopeGloas::from_ssz_bytes(bytes)
-                .map(ExecutionPayloadEnvelope::Gloas),
-            _ => Err(DecodeError::BytesInvalid(format!(
-                "ExecutionPayloadEnvelope does not support fork {fork_name:?}"
-            ))),
         }
     }
 }
