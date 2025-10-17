@@ -8,13 +8,15 @@ use std::io::{Error, ErrorKind};
 use std::sync::Arc;
 use types::{
     AttesterSlashing, AttesterSlashingBase, AttesterSlashingElectra, BlobSidecar,
-    DataColumnSidecar, DataColumnSubnetId, EthSpec, ForkContext, ForkVersionDecode,
+    DataColumnSidecar, DataColumnSubnetId, EthSpec, ForkContext, ForkName,
     LightClientFinalityUpdate, LightClientOptimisticUpdate, PayloadAttestationMessage,
     ProposerSlashing, SignedAggregateAndProof, SignedAggregateAndProofBase,
-    SignedAggregateAndProofElectra, SignedBeaconBlock, SignedBlsToExecutionChange,
-    SignedContributionAndProof, SignedExecutionPayloadEnvelope,
-    SignedExecutionPayloadEnvelopeGloas, SignedVoluntaryExit, SingleAttestation, SubnetId,
-    SyncCommitteeMessage, SyncSubnetId,
+    SignedAggregateAndProofElectra, SignedBeaconBlock, SignedBeaconBlockAltair,
+    SignedBeaconBlockBase, SignedBeaconBlockBellatrix, SignedBeaconBlockCapella,
+    SignedBeaconBlockDeneb, SignedBeaconBlockElectra, SignedBeaconBlockFulu,
+    SignedBeaconBlockGloas, SignedBlsToExecutionChange, SignedContributionAndProof,
+    SignedExecutionPayloadEnvelope, SignedExecutionPayloadEnvelopeGloas, SignedVoluntaryExit,
+    SingleAttestation, SubnetId, SyncCommitteeMessage, SyncSubnetId,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -216,11 +218,38 @@ impl<E: EthSpec> PubsubMessage<E> {
                         let beacon_block = match fork_context
                             .get_fork_from_context_bytes(gossip_topic.fork_digest)
                         {
-                            // TODO(EIP-7732): check with lighthouse team if there's any issue with simplifying to from_ssz_bytes_by_fork here. if so, perhaps we can add that as a comment
-                            Some(fork_name) => {
-                                SignedBeaconBlock::<E>::from_ssz_bytes_by_fork(data, *fork_name)
-                                    .map_err(|e| format!("{:?}", e))?
-                            }
+                            Some(ForkName::Base) => SignedBeaconBlock::<E>::Base(
+                                SignedBeaconBlockBase::from_ssz_bytes(data)
+                                    .map_err(|e| format!("{:?}", e))?,
+                            ),
+                            Some(ForkName::Altair) => SignedBeaconBlock::<E>::Altair(
+                                SignedBeaconBlockAltair::from_ssz_bytes(data)
+                                    .map_err(|e| format!("{:?}", e))?,
+                            ),
+                            Some(ForkName::Bellatrix) => SignedBeaconBlock::<E>::Bellatrix(
+                                SignedBeaconBlockBellatrix::from_ssz_bytes(data)
+                                    .map_err(|e| format!("{:?}", e))?,
+                            ),
+                            Some(ForkName::Capella) => SignedBeaconBlock::<E>::Capella(
+                                SignedBeaconBlockCapella::from_ssz_bytes(data)
+                                    .map_err(|e| format!("{:?}", e))?,
+                            ),
+                            Some(ForkName::Deneb) => SignedBeaconBlock::<E>::Deneb(
+                                SignedBeaconBlockDeneb::from_ssz_bytes(data)
+                                    .map_err(|e| format!("{:?}", e))?,
+                            ),
+                            Some(ForkName::Electra) => SignedBeaconBlock::<E>::Electra(
+                                SignedBeaconBlockElectra::from_ssz_bytes(data)
+                                    .map_err(|e| format!("{:?}", e))?,
+                            ),
+                            Some(ForkName::Fulu) => SignedBeaconBlock::<E>::Fulu(
+                                SignedBeaconBlockFulu::from_ssz_bytes(data)
+                                    .map_err(|e| format!("{:?}", e))?,
+                            ),
+                            Some(ForkName::Gloas) => SignedBeaconBlock::<E>::Gloas(
+                                SignedBeaconBlockGloas::from_ssz_bytes(data)
+                                    .map_err(|e| format!("{:?}", e))?,
+                            ),
                             None => {
                                 return Err(format!(
                                     "Unknown gossipsub fork digest: {:?}",
