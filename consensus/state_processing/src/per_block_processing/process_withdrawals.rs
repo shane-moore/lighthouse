@@ -79,30 +79,35 @@ pub mod capella {
         payload: Payload::Ref<'_>,
         spec: &ChainSpec,
     ) -> Result<(), BlockProcessingError> {
-        let (expected_withdrawals, _, partial_withdrawals_count) =
-            get_expected_withdrawals(state, spec)?;
+        // check if capella enabled because this function will run on the merge block where the fork is technically still Bellatrix
+        if state.fork_name_unchecked().capella_enabled() {
+            let (expected_withdrawals, _, partial_withdrawals_count) =
+                get_expected_withdrawals(state, spec)?;
 
-        let expected_root = expected_withdrawals.tree_hash_root();
-        let withdrawals_root = payload.withdrawals_root()?;
-        if expected_root != withdrawals_root {
-            return Err(BlockProcessingError::WithdrawalsRootMismatch {
-                expected: expected_root,
-                found: withdrawals_root,
-            });
+            let expected_root = expected_withdrawals.tree_hash_root();
+            let withdrawals_root = payload.withdrawals_root()?;
+            if expected_root != withdrawals_root {
+                return Err(BlockProcessingError::WithdrawalsRootMismatch {
+                    expected: expected_root,
+                    found: withdrawals_root,
+                });
+            }
+
+            for withdrawal in expected_withdrawals.iter() {
+                decrease_balance(
+                    state,
+                    withdrawal.validator_index as usize,
+                    withdrawal.amount,
+                )?;
+            }
+
+            process_withdrawals_common(state, expected_withdrawals, partial_withdrawals_count, spec)
+        } else {
+            // these shouldn't even be encountered but they're here for completeness
+            Ok(())
         }
-
-        for withdrawal in expected_withdrawals.iter() {
-            decrease_balance(
-                state,
-                withdrawal.validator_index as usize,
-                withdrawal.amount,
-            )?;
-        }
-
-        process_withdrawals_common(state, expected_withdrawals, partial_withdrawals_count, spec)
     }
 }
-
 pub mod gloas {
     use super::*;
     /// Apply withdrawals to the state.
