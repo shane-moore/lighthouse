@@ -2,7 +2,7 @@ use alloy_consensus::TxEnvelope;
 use alloy_rlp::Decodable;
 use types::{EthSpec, ExecutionPayloadRef, Hash256, Unsigned, VersionedHash};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Error {
     DecodingTransaction(String),
     LengthMismatch { expected: usize, found: usize },
