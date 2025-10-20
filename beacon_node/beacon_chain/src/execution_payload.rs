@@ -9,7 +9,7 @@
 
 use crate::{
     BeaconChain, BeaconChainError, BeaconChainTypes, BlockError, BlockProductionError,
-    ExecutionPayloadError,
+    EnvelopeError, ExecutionPayloadError,
 };
 use execution_layer::{
     BlockProposalContents, BlockProposalContentsType, BuilderParams, NewPayloadRequest,
@@ -106,6 +106,16 @@ impl<T: BeaconChainTypes> PayloadNotifier<T> {
             block,
             payload_verification_status,
         })
+    }
+
+    pub fn from_envelope(
+        _chain: Arc<BeaconChain<T>>,
+        _envelope: ExecutionPayloadEnvelopeRef<T::EthSpec>,
+        _notify_execution_layer: NotifyExecutionLayer,
+    ) -> Result<Self, EnvelopeError> {
+        todo!(
+            "this isn't a real method but something like this will be needed after refactoring this a bit"
+        );
     }
 
     pub async fn notify_new_payload(self) -> Result<PayloadVerificationStatus, BlockError> {

@@ -87,6 +87,7 @@ pub use block_verification_types::AvailabilityPendingExecutedBlock;
 pub use block_verification_types::ExecutedBlock;
 pub use canonical_head::{CachedHead, CanonicalHead, CanonicalHeadRwLock};
 pub use custody_context::CustodyContext;
+pub use envelope_verification::{EnvelopeError, GossipVerifiedEnvelope};
 pub use events::ServerSentEventHandler;
 pub use execution_layer::EngineState;
 pub use execution_payload::NotifyExecutionLayer;

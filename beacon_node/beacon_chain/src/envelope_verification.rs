@@ -4,48 +4,50 @@
 //! diagram below).
 //!
 //! ```ignore
-//!           START
-//!             |
-//!             ▼
-//!   SignedExecutionPayloadEnvelope
-//!             |
-//!             |---------------
-//!             |              |
-//!             |              ▼
-//!             |    GossipVerifiedEnvelope
-//!             |              |
-//!             |---------------
-//!             |
-//!             ▼
-//!   ExecutionPendingEnvelope
-//!             |
-//!           await
-//!             |
-//!             ▼
-//!            END
+//!            START
+//!              |
+//!              ▼
+//! SignedExecutionPayloadEnvelope
+//!              |
+//!              |---------------
+//!              |              |
+//!              |              ▼
+//!              |    GossipVerifiedEnvelope
+//!              |              |
+//!              |---------------
+//!              |
+//!              ▼
+//!  SignatureVerifiedEnvelope
+//!              |
+//!              ▼
+//!  ExecutionPendingEnvelope
+//!              |
+//!            await
+//!              |
+//!              ▼
+//!             END
 //!
 //! ```
 
-use crate::block_verification::{PayloadVerificationHandle, PayloadVerificationOutcome};
-use crate::data_availability_checker::MaybeAvailableEnvelope;
-use crate::envelope_verification_types::EnvelopeImportData;
-use crate::execution_payload::PayloadNotifier;
 use crate::NotifyExecutionLayer;
+use crate::block_verification::{PayloadVerificationHandle, PayloadVerificationOutcome};
+use crate::envelope_verification_types::{EnvelopeImportData, MaybeAvailableEnvelope};
+use crate::execution_payload::PayloadNotifier;
 use crate::{BeaconChain, BeaconChainError, BeaconChainTypes};
 use derivative::Derivative;
 use safe_arith::ArithError;
 use slot_clock::SlotClock;
-use state_processing::envelope_processing::{envelope_processing, EnvelopeProcessingError};
+use state_processing::envelope_processing::{EnvelopeProcessingError, envelope_processing};
 use state_processing::per_block_processing::compute_timestamp_at_slot;
 use state_processing::{BlockProcessingError, VerifySignatures};
 use std::sync::Arc;
 use tree_hash::TreeHash;
 use types::{
-    BeaconState, BeaconStateError, EthSpec, ExecutionBlockHash, Hash256, SignedBlindedBeaconBlock,
-    SignedExecutionPayloadEnvelope,
+    BeaconState, BeaconStateError, ExecutionBlockHash, Hash256, SignedBeaconBlock,
+    SignedExecutionPayloadEnvelope, Slot,
 };
 
-// TODO(EIP7732): don't use this redefinition..
+// TODO(gloas): don't use this redefinition..
 macro_rules! envelope_verify {
     ($condition: expr, $result: expr) => {
         if !$condition {
@@ -54,7 +56,7 @@ macro_rules! envelope_verify {
     };
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum EnvelopeError {
     /// The envelope's block root is unknown.
     BlockRootUnknown {
@@ -117,11 +119,13 @@ pub enum EnvelopeError {
         state: Hash256,
         envelope: Hash256,
     },
-    // The payload was withheld but the block hash
-    // matched the committed bid
-    PayloadWithheldBlockHashMismatch,
+    // The slot doesn't match the parent block
+    SlotMismatch {
+        parent_block: Slot,
+        envelope: Slot,
+    },
     // Some Beacon Chain Error
-    BeaconChainError(BeaconChainError),
+    BeaconChainError(Arc<BeaconChainError>),
     // Some Beacon State error
     BeaconStateError(BeaconStateError),
     // Some ArithError
@@ -132,7 +136,7 @@ pub enum EnvelopeError {
 
 impl From<BeaconChainError> for EnvelopeError {
     fn from(e: BeaconChainError) -> Self {
-        EnvelopeError::BeaconChainError(e)
+        EnvelopeError::BeaconChainError(Arc::new(e))
     }
 }
 
@@ -166,7 +170,7 @@ impl From<EnvelopeProcessingError> for EnvelopeError {
 #[derivative(Debug(bound = "T: BeaconChainTypes"))]
 pub struct GossipVerifiedEnvelope<T: BeaconChainTypes> {
     pub signed_envelope: Arc<SignedExecutionPayloadEnvelope<T::EthSpec>>,
-    pub parent_block: Arc<SignedBlindedBeaconBlock<T::EthSpec>>,
+    pub parent_block: Arc<SignedBeaconBlock<T::EthSpec>>,
     pub pre_state: Box<BeaconState<T::EthSpec>>,
 }
 
@@ -179,7 +183,7 @@ impl<T: BeaconChainTypes> GossipVerifiedEnvelope<T> {
         let payload = envelope.payload();
         let block_root = envelope.beacon_block_root();
 
-        // TODO(EIP7732): this check would fail if the block didn't pass validation right?
+        // TODO(gloas): this check would fail if the block didn't pass validation right?
 
         // check that we've seen the parent block of this envelope
         let fork_choice_read_lock = chain.canonical_head.fork_choice_read_lock();
@@ -189,7 +193,7 @@ impl<T: BeaconChainTypes> GossipVerifiedEnvelope<T> {
         drop(fork_choice_read_lock);
 
         let parent_block = chain
-            .get_blinded_block(&block_root)?
+            .get_full_block(&block_root)?
             .ok_or_else(|| EnvelopeError::from(BeaconChainError::MissingBeaconBlock(block_root)))
             .map(Arc::new)?;
         let execution_bid = &parent_block
@@ -198,10 +202,17 @@ impl<T: BeaconChainTypes> GossipVerifiedEnvelope<T> {
             .signed_execution_bid()?
             .message;
 
-        // TODO(EIP7732): check we're within the bounds of the slot (probably)
+        // TODO(gloas): check we're within the bounds of the slot (probably)
+        // I think a timestamp check like this is on the beacon block but need to check.
+        if envelope.slot() != parent_block.slot() {
+            return Err(EnvelopeError::SlotMismatch {
+                parent_block: parent_block.slot(),
+                envelope: envelope.slot(),
+            });
+        }
 
-        // TODO(EIP7732): check that we haven't seen another valid `SignedExecutionPayloadEnvelope`
-        // for this block root from this builder
+        // TODO(gloas): check that we haven't seen another valid `SignedExecutionPayloadEnvelope`
+        // for this block root from this builder - envelope status table check
 
         // builder index matches committed bid
         if envelope.builder_index() != execution_bid.builder_index {
@@ -211,15 +222,21 @@ impl<T: BeaconChainTypes> GossipVerifiedEnvelope<T> {
             });
         }
 
-        // if payload is withheld, the block hash should not match the committed bid
-        if !envelope.payload_withheld() && payload.block_hash() == execution_bid.block_hash {
-            return Err(EnvelopeError::PayloadWithheldBlockHashMismatch);
+        // the block hash should match the block hash of the execution bid
+        if payload.block_hash() != execution_bid.block_hash {
+            return Err(EnvelopeError::BlockHashMismatch {
+                committed_bid: execution_bid.block_hash,
+                envelope: payload.block_hash(),
+            });
         }
 
+        // TODO(gloas): expensive load here.. check this
         let parent_state = chain
+            // TODO(gloas): may need a get_block_state to get the right state here..
             .get_state(
                 &parent_block.message().state_root(),
                 Some(parent_block.slot()),
+                true,
             )?
             .ok_or_else(|| {
                 EnvelopeError::from(BeaconChainError::MissingBeaconState(
@@ -271,15 +288,24 @@ impl<T: BeaconChainTypes> IntoExecutionPendingEnvelope<T> for GossipVerifiedEnve
         // verify signature already done
         let mut state = *self.pre_state;
 
-        // setting state.latest_block_header happens in envelope_processing
+        // all state modifications are done in envelope_processing (called at the bottom of this function)
+        // so here perform the consistency check with the beacon block on a copy of the latest block header
+        // and let it be modified later in envelope_processing
+        let previous_state_root = state.canonical_root()?;
+        if state.latest_block_header().state_root == Hash256::default() {
+            let mut copy_of_latest_block_header = state.latest_block_header().clone();
+            copy_of_latest_block_header.state_root = previous_state_root;
 
-        // Verify consistency with the beacon block
-        if !envelope.tree_hash_root() == state.latest_block_header().tree_hash_root() {
-            return Err(EnvelopeError::LatestBlockHeaderMismatch {
-                envelope_root: envelope.tree_hash_root(),
-                block_header_root: state.latest_block_header().tree_hash_root(),
-            });
-        };
+            // Verify consistency with the beacon block
+            if !envelope.beacon_block_root() == copy_of_latest_block_header.tree_hash_root() {
+                return Err(EnvelopeError::LatestBlockHeaderMismatch {
+                    envelope_root: envelope.beacon_block_root(),
+                    block_header_root: copy_of_latest_block_header.tree_hash_root(),
+                });
+            };
+        }
+
+        // the check about the slots matching is already done in the GossipVerifiedEnvelope
 
         // Verify consistency with the committed bid
         let committed_bid = state.latest_execution_bid()?;
@@ -293,79 +319,68 @@ impl<T: BeaconChainTypes> IntoExecutionPendingEnvelope<T> for GossipVerifiedEnve
             });
         };
 
-        if !envelope.payload_withheld() {
-            // Verify the withdrawals root
-            envelope_verify!(
-                payload.withdrawals()?.tree_hash_root() == state.latest_withdrawals_root()?,
-                EnvelopeError::WithdrawalsRootMismatch {
-                    state: state.latest_withdrawals_root()?,
-                    envelope: payload.withdrawals()?.tree_hash_root(),
-                }
-                .into()
-            );
+        // Verify the withdrawals root
+        envelope_verify!(
+            payload.withdrawals()?.tree_hash_root() == *state.latest_withdrawals_root()?,
+            EnvelopeError::WithdrawalsRootMismatch {
+                state: *state.latest_withdrawals_root()?,
+                envelope: payload.withdrawals()?.tree_hash_root(),
+            }
+            .into()
+        );
 
-            // Verify the gas limit
-            envelope_verify!(
-                payload.gas_limit() == committed_bid.gas_limit,
-                EnvelopeError::GasLimitMismatch {
-                    committed_bid: committed_bid.gas_limit,
-                    envelope: payload.gas_limit(),
-                }
-                .into()
-            );
-            // Verify the block hash
-            envelope_verify!(
-                committed_bid.block_hash == payload.block_hash(),
-                EnvelopeError::BlockHashMismatch {
-                    committed_bid: committed_bid.block_hash,
-                    envelope: payload.block_hash(),
-                }
-                .into()
-            );
+        // Verify the gas limit
+        envelope_verify!(
+            payload.gas_limit() == committed_bid.gas_limit,
+            EnvelopeError::GasLimitMismatch {
+                committed_bid: committed_bid.gas_limit,
+                envelope: payload.gas_limit(),
+            }
+            .into()
+        );
+        // Verify the block hash already done in the GossipVerifiedEnvelope
 
-            // Verify consistency of the parent hash with respect to the previous execution payload
-            envelope_verify!(
-                payload.parent_hash() == state.latest_block_hash()?,
-                EnvelopeError::ParentHashMismatch {
-                    state: state.latest_block_hash()?,
-                    envelope: payload.parent_hash(),
-                }
-                .into()
-            );
+        // Verify consistency of the parent hash with respect to the previous execution payload
+        envelope_verify!(
+            payload.parent_hash() == *state.latest_block_hash()?,
+            EnvelopeError::ParentHashMismatch {
+                state: *state.latest_block_hash()?,
+                envelope: payload.parent_hash(),
+            }
+            .into()
+        );
 
-            // Verify prev_randao
-            envelope_verify!(
-                payload.prev_randao() == *state.get_randao_mix(state.current_epoch())?,
-                EnvelopeError::PrevRandaoMismatch {
-                    state: *state.get_randao_mix(state.current_epoch())?,
-                    envelope: payload.prev_randao(),
-                }
-                .into()
-            );
+        // Verify prev_randao
+        envelope_verify!(
+            payload.prev_randao() == *state.get_randao_mix(state.current_epoch())?,
+            EnvelopeError::PrevRandaoMismatch {
+                state: *state.get_randao_mix(state.current_epoch())?,
+                envelope: payload.prev_randao(),
+            }
+            .into()
+        );
 
-            // Verify the timestamp
-            let state_timestamp =
-                compute_timestamp_at_slot(&state, state.slot(), chain.spec.as_ref())?;
-            envelope_verify!(
-                payload.timestamp() == state_timestamp,
-                EnvelopeError::TimestampMismatch {
-                    state: state_timestamp,
-                    envelope: payload.timestamp(),
-                }
-                .into()
-            );
+        // Verify the timestamp
+        let state_timestamp = compute_timestamp_at_slot(&state, state.slot(), chain.spec.as_ref())?;
+        envelope_verify!(
+            payload.timestamp() == state_timestamp,
+            EnvelopeError::TimestampMismatch {
+                state: state_timestamp,
+                envelope: payload.timestamp(),
+            }
+            .into()
+        );
 
-            // Verify the commitments are under limit
-            envelope_verify!(
-                envelope.blob_kzg_commitments().len()
-                    <= T::EthSpec::max_blob_commitments_per_block(),
-                EnvelopeError::BlobLimitExceeded {
-                    max: T::EthSpec::max_blob_commitments_per_block(),
-                    envelope: envelope.blob_kzg_commitments().len(),
-                }
-                .into()
-            );
-        }
+        // Verify the commitments are under limit
+        let max_blobs = chain.spec.max_blobs_per_block(state.current_epoch()) as usize;
+        envelope_verify!(
+            envelope.blob_kzg_commitments().len() <= max_blobs,
+            EnvelopeError::BlobLimitExceeded {
+                max: max_blobs,
+                envelope: envelope.blob_kzg_commitments().len(),
+            }
+            .into()
+        );
 
         // Verify the execution payload is valid
         let payload_notifier =
@@ -375,7 +390,7 @@ impl<T: BeaconChainTypes> IntoExecutionPendingEnvelope<T> for GossipVerifiedEnve
 
         let payload_verification_future = async move {
             let chain = payload_notifier.chain.clone();
-            // TODO:(EIP7732): timing
+            // TODO:(gloas): timing
             if let Some(started_execution) = chain.slot_clock.now_duration() {
                 chain.block_times_cache.write().set_time_started_execution(
                     block_root,
@@ -410,7 +425,7 @@ impl<T: BeaconChainTypes> IntoExecutionPendingEnvelope<T> for GossipVerifiedEnve
             &chain.spec,
         )?;
 
-        // TODO(EIP7732): if verify
+        // TODO(gloas): if verify
         envelope_verify!(
             state.canonical_root()? == envelope.state_root(),
             EnvelopeError::InvalidStateRoot {
@@ -421,7 +436,7 @@ impl<T: BeaconChainTypes> IntoExecutionPendingEnvelope<T> for GossipVerifiedEnve
 
         Ok(ExecutionPendingEnvelope {
             signed_envelope: MaybeAvailableEnvelope::AvailabilityPending {
-                block_root,
+                block_hash: payload.block_hash(),
                 envelope: signed_envelope,
             },
             import_data: EnvelopeImportData {
@@ -442,7 +457,7 @@ impl<T: BeaconChainTypes> IntoExecutionPendingEnvelope<T>
         chain: &Arc<BeaconChain<T>>,
         notify_execution_layer: NotifyExecutionLayer,
     ) -> Result<ExecutionPendingEnvelope<T>, EnvelopeError> {
-        // TODO(EIP7732): figure out how this should be refactored..
+        // TODO(gloas): figure out how this should be refactored..
         GossipVerifiedEnvelope::new(self, chain)?
             .into_execution_pending_envelope(chain, notify_execution_layer)
     }

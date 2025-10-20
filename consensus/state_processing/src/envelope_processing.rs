@@ -1,9 +1,11 @@
+use crate::BlockProcessingError;
+use crate::VerifySignatures;
 use crate::per_block_processing::process_operations::{
     process_consolidation_requests, process_deposit_requests, process_withdrawal_requests,
 };
-use crate::BlockProcessingError;
-use crate::VerifySignatures;
-use types::{BeaconState, BeaconStateError, ChainSpec, EthSpec, Hash256, SignedExecutionPayloadEnvelope};
+use types::{
+    BeaconState, BeaconStateError, ChainSpec, EthSpec, Hash256, SignedExecutionPayloadEnvelope,
+};
 
 #[derive(Debug)]
 pub enum EnvelopeProcessingError {
@@ -46,8 +48,6 @@ pub fn envelope_processing<E: EthSpec>(
     if state.latest_block_header().state_root == Hash256::default() {
         state.latest_block_header_mut().state_root = previous_state_root;
     }
-
-    // Verify consistency with the beacon block
 
     // process electra operations
     let envelope = signed_envelope.message();

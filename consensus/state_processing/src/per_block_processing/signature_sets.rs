@@ -11,8 +11,9 @@ use types::{
     BeaconStateError, ChainSpec, DepositData, Domain, Epoch, EthSpec, Fork, Hash256,
     InconsistentFork, IndexedAttestation, IndexedAttestationRef, ProposerSlashing, PublicKey,
     PublicKeyBytes, Signature, SignedAggregateAndProof, SignedBeaconBlock, SignedBeaconBlockHeader,
-    SignedBlsToExecutionChange, SignedContributionAndProof, SignedRoot, SignedVoluntaryExit,
-    SigningData, Slot, SyncAggregate, SyncAggregatorSelectionData, Unsigned, SignedExecutionPayloadEnvelope,
+    SignedBlsToExecutionChange, SignedContributionAndProof, SignedExecutionPayloadEnvelope,
+    SignedRoot, SignedVoluntaryExit, SigningData, Slot, SyncAggregate, SyncAggregatorSelectionData,
+    Unsigned,
 };
 
 pub type Result<T> = std::result::Result<T, Error>;
