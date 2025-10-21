@@ -673,7 +673,7 @@ impl<E: EthSpec, Payload: AbstractExecPayload<E>> EmptyBlock for BeaconBlockGloa
                 voluntary_exits: VariableList::empty(),
                 sync_aggregate: SyncAggregate::empty(),
                 bls_to_execution_changes: VariableList::empty(),
-                signed_execution_bid: SignedExecutionBid::empty(),
+                signed_execution_payload_bid: SignedExecutionPayloadBid::empty(),
                 payload_attestations: VariableList::empty(),
                 _phantom: PhantomData,
             },

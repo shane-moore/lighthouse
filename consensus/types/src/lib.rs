@@ -42,9 +42,9 @@ pub mod dumb_macros;
 pub mod enr_fork_id;
 pub mod eth1_data;
 pub mod eth_spec;
-pub mod execution_bid;
 pub mod execution_block_hash;
 pub mod execution_payload;
+pub mod execution_payload_bid;
 pub mod execution_payload_envelope;
 pub mod execution_payload_header;
 pub mod fork;
@@ -77,7 +77,7 @@ pub mod signed_beacon_block;
 pub mod signed_beacon_block_header;
 pub mod signed_bls_to_execution_change;
 pub mod signed_contribution_and_proof;
-pub mod signed_execution_bid;
+pub mod signed_execution_payload_bid;
 pub mod signed_execution_payload_envelope;
 pub mod signed_voluntary_exit;
 pub mod signing_data;
@@ -178,7 +178,6 @@ pub use crate::enr_fork_id::EnrForkId;
 pub use crate::epoch_cache::{EpochCache, EpochCacheError, EpochCacheKey};
 pub use crate::eth_spec::EthSpecId;
 pub use crate::eth1_data::Eth1Data;
-pub use crate::execution_bid::ExecutionBid;
 pub use crate::execution_block_hash::ExecutionBlockHash;
 pub use crate::execution_block_header::{EncodableExecutionBlockHeader, ExecutionBlockHeader};
 pub use crate::execution_payload::{
@@ -186,6 +185,7 @@ pub use crate::execution_payload::{
     ExecutionPayloadElectra, ExecutionPayloadFulu, ExecutionPayloadGloas, ExecutionPayloadRef,
     Transaction, Transactions, Withdrawals,
 };
+pub use crate::execution_payload_bid::ExecutionPayloadBid;
 pub use crate::execution_payload_envelope::{
     ExecutionPayloadEnvelope, ExecutionPayloadEnvelopeGloas, ExecutionPayloadEnvelopeNextFork,
     ExecutionPayloadEnvelopeRef,
@@ -266,7 +266,7 @@ pub use crate::signed_beacon_block::{
 pub use crate::signed_beacon_block_header::SignedBeaconBlockHeader;
 pub use crate::signed_bls_to_execution_change::SignedBlsToExecutionChange;
 pub use crate::signed_contribution_and_proof::SignedContributionAndProof;
-pub use crate::signed_execution_bid::SignedExecutionBid;
+pub use crate::signed_execution_payload_bid::SignedExecutionPayloadBid;
 pub use crate::signed_execution_payload_envelope::SignedExecutionPayloadEnvelope;
 pub use crate::signed_voluntary_exit::SignedVoluntaryExit;
 pub use crate::signing_data::{SignedRoot, SigningData};

@@ -59,6 +59,7 @@ pub struct ExecutionPayloadEnvelope<E: EthSpec> {
     pub state_root: Hash256,
 }
 
+impl<E: EthSpec> SignedRoot for ExecutionPayloadEnvelope<E> {}
 impl<'a, E: EthSpec> SignedRoot for ExecutionPayloadEnvelopeRef<'a, E> {}
 
 impl<'a, E: EthSpec> ExecutionPayloadEnvelopeRef<'a, E> {

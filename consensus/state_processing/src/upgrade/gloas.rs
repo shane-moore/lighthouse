@@ -2,7 +2,7 @@ use bls::Hash256;
 use std::mem;
 use types::{
     BeaconState, BeaconStateError as Error, BeaconStateGloas, BitVector, BuilderPendingPayment,
-    ChainSpec, EthSpec, ExecutionBid, Fork, List, Vector,
+    ChainSpec, EthSpec, ExecutionPayloadBid, Fork, List, Vector,
 };
 
 /// Transform a `Fulu` state into a `Gloas` state.
@@ -68,7 +68,7 @@ pub fn upgrade_state_to_gloas<E: EthSpec>(
         current_sync_committee: pre.current_sync_committee.clone(),
         next_sync_committee: pre.next_sync_committee.clone(),
         // Execution Bid
-        latest_execution_bid: ExecutionBid::default(),
+        latest_execution_payload_bid: ExecutionPayloadBid::default(),
         // Capella
         next_withdrawal_index: pre.next_withdrawal_index,
         next_withdrawal_validator_index: pre.next_withdrawal_validator_index,

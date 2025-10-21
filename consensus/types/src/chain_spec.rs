@@ -1737,12 +1737,6 @@ pub struct Config {
     #[serde(serialize_with = "serialize_fork_epoch")]
     #[serde(deserialize_with = "deserialize_fork_epoch")]
     pub gloas_fork_epoch: Option<MaybeQuoted<Epoch>>,
-    #[serde(default = "default_builder_payment_threshold_numerator")]
-    #[serde(with = "serde_utils::quoted_u64")]
-    pub builder_payment_threshold_numerator: u64,
-    #[serde(default = "default_builder_payment_threshold_denominator")]
-    #[serde(with = "serde_utils::quoted_u64")]
-    pub builder_payment_threshold_denominator: u64,
 
     #[serde(with = "serde_utils::quoted_u64")]
     seconds_per_slot: u64,
@@ -1904,14 +1898,6 @@ fn default_fulu_fork_version() -> [u8; 4] {
 fn default_gloas_fork_version() -> [u8; 4] {
     // This value shouldn't be used.
     [0xff, 0xff, 0xff, 0xff]
-}
-
-fn default_builder_payment_threshold_numerator() -> u64 {
-    6
-}
-
-fn default_builder_payment_threshold_denominator() -> u64 {
-    10
 }
 
 /// Placeholder value: 2^256-2^10 (115792089237316195423570985008687907853269984665640564039457584007913129638912).
@@ -2218,9 +2204,6 @@ impl Config {
                 .gloas_fork_epoch
                 .map(|epoch| MaybeQuoted { value: epoch }),
 
-            builder_payment_threshold_numerator: spec.builder_payment_threshold_numerator,
-            builder_payment_threshold_denominator: spec.builder_payment_threshold_denominator,
-
             seconds_per_slot: spec.seconds_per_slot,
             seconds_per_eth1_block: spec.seconds_per_eth1_block,
             min_validator_withdrawability_delay: spec.min_validator_withdrawability_delay,
@@ -2312,8 +2295,6 @@ impl Config {
             fulu_fork_version,
             gloas_fork_version,
             gloas_fork_epoch,
-            builder_payment_threshold_numerator,
-            builder_payment_threshold_denominator,
             seconds_per_slot,
             seconds_per_eth1_block,
             min_validator_withdrawability_delay,
@@ -2387,8 +2368,6 @@ impl Config {
             fulu_fork_version,
             gloas_fork_version,
             gloas_fork_epoch: gloas_fork_epoch.map(|q| q.value),
-            builder_payment_threshold_numerator,
-            builder_payment_threshold_denominator,
             seconds_per_slot,
             seconds_per_eth1_block,
             min_validator_withdrawability_delay,

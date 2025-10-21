@@ -12,7 +12,7 @@ pub struct PayloadAttestationMessage {
     #[serde(with = "serde_utils::quoted_u64")]
     pub validator_index: u64,
     pub data: PayloadAttestationData,
-    pub signature: AggregateSignature,
+    pub signature: Signature,
 }
 
 #[cfg(test)]
