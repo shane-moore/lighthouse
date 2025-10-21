@@ -2184,15 +2184,11 @@ impl<E: EthSpec> BeaconState<E> {
     ///
     /// Note: this function will not build any new committee caches, nor will it update the total
     /// active balance cache. The total active balance cache must be updated separately.
-    pub fn advance_caches(&mut self) -> Result<(), Error> {
+    pub fn advance_committee_caches(&mut self) -> Result<(), Error> {
         self.committee_caches_mut().rotate_left(1);
 
         let next = Self::committee_cache_index(RelativeEpoch::Next);
         *self.committee_cache_at_index_mut(next)? = Arc::new(CommitteeCache::default());
-
-        // Also advance PTC caches
-        // TODO(EIP-7732): look more into this and if makes sense
-        self.advance_ptc_caches()?;
 
         Ok(())
     }
@@ -2305,8 +2301,7 @@ impl<E: EthSpec> BeaconState<E> {
         epoch: Epoch,
         spec: &ChainSpec,
     ) -> Result<Arc<PTCCache>, Error> {
-        let relative_epoch = RelativeEpoch::from_epoch(self.current_epoch(), epoch)?;
-        Ok(Arc::new(PTCCache::initialized(self, relative_epoch, spec)?))
+        PTCCache::initialized(self, epoch, spec)
     }
 
     /// Advances the PTC cache for this state into the next epoch.

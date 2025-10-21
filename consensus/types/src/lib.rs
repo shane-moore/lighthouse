@@ -154,6 +154,7 @@ pub use crate::beacon_committee::{BeaconCommittee, OwnedBeaconCommittee};
 pub use crate::beacon_response::{
     BeaconResponse, ForkVersionDecode, ForkVersionedResponse, UnversionedResponse,
 };
+pub use crate::beacon_state::ptc_cache::PTCCache;
 pub use crate::beacon_state::{Error as BeaconStateError, *};
 pub use crate::blob_sidecar::{BlobIdentifier, BlobSidecar, BlobSidecarList, BlobsList};
 pub use crate::bls_to_execution_change::BlsToExecutionChange;
@@ -252,7 +253,6 @@ pub use crate::preset::{
 pub use crate::proposer_preparation_data::ProposerPreparationData;
 pub use crate::proposer_slashing::ProposerSlashing;
 pub use crate::ptc::PTC;
-pub use crate::beacon_state::ptc_cache::PTCCache;
 pub use crate::relative_epoch::{Error as RelativeEpochError, RelativeEpoch};
 pub use crate::runtime_fixed_vector::RuntimeFixedVector;
 pub use crate::runtime_var_list::RuntimeVariableList;

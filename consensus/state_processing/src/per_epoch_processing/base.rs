@@ -70,7 +70,8 @@ pub fn process_epoch<E: EthSpec>(
     process_participation_record_updates(state)?;
 
     // Rotate the epoch caches to suit the epoch transition.
-    state.advance_caches()?;
+    state.advance_committee_caches()?;
+    state.advance_ptc_caches()?;
 
     Ok(EpochProcessingSummary::Base {
         total_balances: validator_statuses.total_balances,

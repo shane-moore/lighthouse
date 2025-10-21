@@ -83,7 +83,8 @@ pub fn process_epoch<E: EthSpec>(
     }
 
     // Rotate the epoch caches to suit the epoch transition.
-    state.advance_caches()?;
+    state.advance_committee_caches()?;
+    state.advance_ptc_caches()?;
     update_progressive_balances_on_epoch_transition(state, spec)?;
 
     Ok(EpochProcessingSummary::Altair {
