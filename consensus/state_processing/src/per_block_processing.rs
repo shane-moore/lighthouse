@@ -177,7 +177,6 @@ pub fn per_block_processing<E: EthSpec, Payload: AbstractExecPayload<E>>(
         let body = block.body();
         if state.fork_name_unchecked().gloas_enabled() {
             process_withdrawals::gloas::process_withdrawals::<E>(state, spec)?;
-            // TODO(EIP-7732) Mark had process_execution_payload_bid above process_randao so need to clarify if makes more sense here or there
             process_execution_payload_bid(state, block, verify_signatures, spec)?;
         } else {
             process_withdrawals::capella::process_withdrawals::<E, Payload>(
@@ -820,27 +819,29 @@ pub fn process_execution_payload_bid<E: EthSpec, Payload: AbstractExecPayload<E>
         .into()
     );
 
-    // Record the pending payment
-    let pending_payment = BuilderPendingPayment {
-        weight: 0,
-        withdrawal: BuilderPendingWithdrawal {
-            fee_recipient: bid.fee_recipient,
-            amount,
-            builder_index,
-            // TODO(EIP7732): verify if ok to use default here, withdrawable_epoch is not set in the python spec, https://ethereum.github.io/consensus-specs/specs/_features/eip7732/beacon-chain/#new-process_execution_payload_header
-            ..Default::default()
-        },
-    };
+    // Record the pending payment if there is some payment
+    if amount > 0 {
+        let pending_payment = BuilderPendingPayment {
+            weight: 0,
+            withdrawal: BuilderPendingWithdrawal {
+                fee_recipient: bid.fee_recipient,
+                amount,
+                builder_index,
+                withdrawable_epoch: spec.far_future_epoch,
+            },
+        };
 
-    let payment_index =
-        (E::slots_per_epoch() + (bid.slot.as_u64() % E::slots_per_epoch())) as usize;
+        let payment_index = (E::slots_per_epoch()
+            .safe_add(bid.slot.as_u64().safe_rem(E::slots_per_epoch())?)?)
+            as usize;
 
-    *state
-        .builder_pending_payments_mut()?
-        .get_mut(payment_index)
-        .ok_or(BlockProcessingError::BeaconStateError(
-            BeaconStateError::BuilderPendingPaymentsIndexNotSupported(payment_index),
-        ))? = pending_payment;
+        *state
+            .builder_pending_payments_mut()?
+            .get_mut(payment_index)
+            .ok_or(BlockProcessingError::BeaconStateError(
+                BeaconStateError::BuilderPendingPaymentsIndexNotSupported(payment_index),
+            ))? = pending_payment;
+    }
 
     // Cache the execution bid
     *state.latest_execution_payload_bid_mut()? = bid.clone();
