@@ -17,9 +17,6 @@
 //!              |---------------
 //!              |
 //!              ▼
-//!  SignatureVerifiedEnvelope
-//!              |
-//!              ▼
 //!  ExecutionPendingEnvelope
 //!              |
 //!            await
@@ -35,26 +32,15 @@ use crate::envelope_verification_types::{EnvelopeImportData, MaybeAvailableEnvel
 use crate::execution_payload::PayloadNotifier;
 use crate::{BeaconChain, BeaconChainError, BeaconChainTypes};
 use derivative::Derivative;
-use safe_arith::ArithError;
 use slot_clock::SlotClock;
 use state_processing::envelope_processing::{EnvelopeProcessingError, envelope_processing};
-use state_processing::per_block_processing::compute_timestamp_at_slot;
 use state_processing::{BlockProcessingError, VerifySignatures};
 use std::sync::Arc;
-use tree_hash::TreeHash;
+use tracing::{debug, instrument};
 use types::{
-    BeaconState, BeaconStateError, ExecutionBlockHash, Hash256, SignedBeaconBlock,
+    BeaconState, BeaconStateError, EthSpec, ExecutionBlockHash, Hash256, SignedBeaconBlock,
     SignedExecutionPayloadEnvelope, Slot,
 };
-
-// TODO(gloas): don't use this redefinition..
-macro_rules! envelope_verify {
-    ($condition: expr, $result: expr) => {
-        if !$condition {
-            return Err($result);
-        }
-    };
-}
 
 #[derive(Debug, Clone)]
 pub enum EnvelopeError {
@@ -64,74 +50,33 @@ pub enum EnvelopeError {
     },
     /// The signature is invalid.
     BadSignature,
-    /// Envelope doesn't match latest beacon block header
-    LatestBlockHeaderMismatch {
-        envelope_root: Hash256,
-        block_header_root: Hash256,
-    },
     /// The builder index doesn't match the committed bid
     BuilderIndexMismatch {
         committed_bid: u64,
         envelope: u64,
-    },
-    /// The blob KZG commitments root doesn't match the committed bid
-    BlobKzgCommitmentsRootMismatch {
-        committed_bid: Hash256,
-        envelope: Hash256,
-    },
-    /// The withdrawals root doesn't match the state's latest withdrawals root
-    WithdrawalsRootMismatch {
-        state: Hash256,
-        envelope: Hash256,
-    },
-    // The gas limit doesn't match the committed bid
-    GasLimitMismatch {
-        committed_bid: u64,
-        envelope: u64,
-    },
-    // The block hash doesn't match the committed bid
-    BlockHashMismatch {
-        committed_bid: ExecutionBlockHash,
-        envelope: ExecutionBlockHash,
-    },
-    // The parent hash doesn't match the previous execution payload
-    ParentHashMismatch {
-        state: ExecutionBlockHash,
-        envelope: ExecutionBlockHash,
-    },
-    // The previous randao didn't match the payload
-    PrevRandaoMismatch {
-        state: Hash256,
-        envelope: Hash256,
-    },
-    // The timestamp didn't match the payload
-    TimestampMismatch {
-        state: u64,
-        envelope: u64,
-    },
-    // Blob committments exceeded the maximum
-    BlobLimitExceeded {
-        max: usize,
-        envelope: usize,
-    },
-    // Invalid state root
-    InvalidStateRoot {
-        state: Hash256,
-        envelope: Hash256,
     },
     // The slot doesn't match the parent block
     SlotMismatch {
         parent_block: Slot,
         envelope: Slot,
     },
+    // The validator index is unknown
+    UnknownValidator {
+        builder_index: u64,
+    },
+    // The block hash doesn't match the committed bid
+    BlockHashMismatch {
+        committed_bid: ExecutionBlockHash,
+        envelope: ExecutionBlockHash,
+    },
     // Some Beacon Chain Error
     BeaconChainError(Arc<BeaconChainError>),
     // Some Beacon State error
     BeaconStateError(BeaconStateError),
-    // Some ArithError
-    ArithError(ArithError),
     // Some BlockProcessingError (for electra operations)
     BlockProcessingError(BlockProcessingError),
+    // Some EnvelopeProcessingError
+    EnvelopeProcessingError(EnvelopeProcessingError),
 }
 
 impl From<BeaconChainError> for EnvelopeError {
@@ -146,22 +91,118 @@ impl From<BeaconStateError> for EnvelopeError {
     }
 }
 
-impl From<ArithError> for EnvelopeError {
-    fn from(e: ArithError) -> Self {
-        EnvelopeError::ArithError(e)
-    }
-}
-
+/// Pull errors up from EnvelopeProcessingError to EnvelopeError
 impl From<EnvelopeProcessingError> for EnvelopeError {
     fn from(e: EnvelopeProcessingError) -> Self {
         match e {
             EnvelopeProcessingError::BadSignature => EnvelopeError::BadSignature,
             EnvelopeProcessingError::BeaconStateError(e) => EnvelopeError::BeaconStateError(e),
+            EnvelopeProcessingError::BlockHashMismatch {
+                committed_bid,
+                envelope,
+            } => EnvelopeError::BlockHashMismatch {
+                committed_bid,
+                envelope,
+            },
             EnvelopeProcessingError::BlockProcessingError(e) => {
                 EnvelopeError::BlockProcessingError(e)
             }
+            e => EnvelopeError::EnvelopeProcessingError(e),
         }
     }
+}
+
+/// This snapshot is to be used for verifying a envelope of the block.
+#[derive(Debug, Clone)]
+pub struct EnvelopeProcessingSnapshot<E: EthSpec> {
+    /// This state is equivalent to the `self.beacon_block.state_root()` before applying the envelope.
+    pub pre_state: BeaconState<E>,
+    pub state_root: Hash256,
+    pub beacon_block_root: Hash256,
+}
+
+#[allow(clippy::type_complexity)]
+#[instrument(skip_all, level = "debug", fields(beacon_block_root = %envelope.beacon_block_root()))]
+fn load_snapshot<T: BeaconChainTypes>(
+    envelope: &SignedExecutionPayloadEnvelope<T::EthSpec>,
+    chain: &BeaconChain<T>,
+) -> Result<EnvelopeProcessingSnapshot<T::EthSpec>, EnvelopeError> {
+    // Reject any block if its parent is not known to fork choice.
+    //
+    // A block that is not in fork choice is either:
+    //
+    //  - Not yet imported: we should reject this block because we should only import a child
+    //  after its parent has been fully imported.
+    //  - Pre-finalized: if the parent block is _prior_ to finalization, we should ignore it
+    //  because it will revert finalization. Note that the finalized block is stored in fork
+    //  choice, so we will not reject any child of the finalized block (this is relevant during
+    //  genesis).
+
+    let beacon_block_root = envelope.beacon_block_root();
+    if !chain
+        .canonical_head
+        .fork_choice_read_lock()
+        .contains_block(&beacon_block_root)
+    {
+        return Err(EnvelopeError::BlockRootUnknown {
+            block_root: beacon_block_root,
+        });
+    }
+
+    let fork_choice_read_lock = chain.canonical_head.fork_choice_read_lock();
+    let Some(proto_beacon_block) = fork_choice_read_lock.get_block(&beacon_block_root) else {
+        return Err(EnvelopeError::BlockRootUnknown {
+            block_root: beacon_block_root,
+        });
+    };
+    drop(fork_choice_read_lock);
+
+    // TODO(gloas): add metrics here
+
+    let result = {
+        // Load the parent block's state from the database, returning an error if it is not found.
+        // It is an error because if we know the parent block we should also know the parent state.
+        // Retrieve any state that is advanced through to at most `block.slot()`: this is
+        // particularly important if `block` descends from the finalized/split block, but at a slot
+        // prior to the finalized slot (which is invalid and inaccessible in our DB schema).
+        let (parent_state_root, state) = chain
+            .store
+            // TODO(gloas): the state doesn't need to be advanced here because we're applying an envelope
+            //              but this function does use a lot of caches that could be more efficient. Is there
+            //              a better way to do this?
+            .get_advanced_hot_state(
+                beacon_block_root,
+                proto_beacon_block.slot,
+                proto_beacon_block.state_root,
+            )
+            .map_err(|e| EnvelopeError::BeaconChainError(Arc::new(e.into())))?
+            .ok_or_else(|| {
+                BeaconChainError::DBInconsistent(format!(
+                    "Missing state for parent block {beacon_block_root:?}",
+                ))
+            })?;
+
+        if state.slot() == proto_beacon_block.slot {
+            // Sanity check.
+            if parent_state_root != proto_beacon_block.state_root {
+                return Err(BeaconChainError::DBInconsistent(format!(
+                    "Parent state at slot {} has the wrong state root: {:?} != {:?}",
+                    state.slot(),
+                    parent_state_root,
+                    proto_beacon_block.state_root,
+                ))
+                .into());
+            }
+        }
+
+        Ok(EnvelopeProcessingSnapshot {
+            pre_state: state,
+            state_root: parent_state_root,
+            beacon_block_root,
+        })
+    };
+
+    result
 }
 
 /// A wrapper around a `SignedExecutionPayloadEnvelope` that indicates it has been approved for re-gossiping on
@@ -171,7 +212,7 @@ impl From<EnvelopeProcessingError> for EnvelopeError {
 pub struct GossipVerifiedEnvelope<T: BeaconChainTypes> {
     pub signed_envelope: Arc<SignedExecutionPayloadEnvelope<T::EthSpec>>,
     pub parent_block: Arc<SignedBeaconBlock<T::EthSpec>>,
-    pub pre_state: Box<BeaconState<T::EthSpec>>,
+    pub parent: Option<Box<EnvelopeProcessingSnapshot<T::EthSpec>>>,
 }
 
 impl<T: BeaconChainTypes> GossipVerifiedEnvelope<T> {
@@ -181,38 +222,49 @@ impl<T: BeaconChainTypes> GossipVerifiedEnvelope<T> {
     ) -> Result<Self, EnvelopeError> {
         let envelope = signed_envelope.message();
         let payload = envelope.payload();
-        let block_root = envelope.beacon_block_root();
+        let beacon_block_root = envelope.beacon_block_root();
 
+        // check that we've seen the parent block of this envelope and that it passes validation
         // TODO(gloas): this check would fail if the block didn't pass validation right?
-
-        // check that we've seen the parent block of this envelope
         let fork_choice_read_lock = chain.canonical_head.fork_choice_read_lock();
-        if !fork_choice_read_lock.contains_block(&block_root) {
-            return Err(EnvelopeError::BlockRootUnknown { block_root });
-        }
+        let Some(parent_proto_block) = fork_choice_read_lock.get_block(&beacon_block_root) else {
+            return Err(EnvelopeError::BlockRootUnknown {
+                block_root: beacon_block_root,
+            });
+        };
         drop(fork_choice_read_lock);
 
+        // TODO(gloas): check that we haven't seen another valid `SignedExecutionPayloadEnvelope`
+        // for this block root from this builder - envelope status table check
+
+        // TODO(gloas): this should probably be obtained from the ProtoBlock instead of the DB
+        //              but this means the ProtoBlock needs to include something like the ExecutionBid
+        //              will need to answer this question later.
         let parent_block = chain
-            .get_full_block(&block_root)?
-            .ok_or_else(|| EnvelopeError::from(BeaconChainError::MissingBeaconBlock(block_root)))
+            .get_full_block(&beacon_block_root)?
+            .ok_or_else(|| {
+                EnvelopeError::from(BeaconChainError::MissingBeaconBlock(beacon_block_root))
+            })
             .map(Arc::new)?;
         let execution_bid = &parent_block
             .message()
             .body()
-            .signed_execution_bid()?
+            .signed_execution_payload_bid()?
             .message;
 
-        // TODO(gloas): check we're within the bounds of the slot (probably)
-        // I think a timestamp check like this is on the beacon block but need to check.
+        // TODO(gloas): Gossip rules for the beacon block contain the following:
+        // https://github.com/ethereum/consensus-specs/blob/master/specs/phase0/p2p-interface.md#beacon_block
+        // [IGNORE] The block is not from a future slot (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance)
+        // [IGNORE] The block is from a slot greater than the latest finalized slot
+        // should these kinds of checks be included for envelopes as well?
+
+        // check that the slot of the envelope matches the slot of the parent block
         if envelope.slot() != parent_block.slot() {
             return Err(EnvelopeError::SlotMismatch {
                 parent_block: parent_block.slot(),
                 envelope: envelope.slot(),
             });
         }
-
-        // TODO(gloas): check that we haven't seen another valid `SignedExecutionPayloadEnvelope`
-        // for this block root from this builder - envelope status table check
 
         // builder index matches committed bid
         if envelope.builder_index() != execution_bid.builder_index {
@@ -230,29 +282,59 @@ impl<T: BeaconChainTypes> GossipVerifiedEnvelope<T> {
             });
         }
 
-        // TODO(gloas): expensive load here.. check this
-        let parent_state = chain
-            // TODO(gloas): may need a get_block_state to get the right state here..
-            .get_state(
-                &parent_block.message().state_root(),
-                Some(parent_block.slot()),
-                true,
-            )?
-            .ok_or_else(|| {
-                EnvelopeError::from(BeaconChainError::MissingBeaconState(
-                    parent_block.message().state_root(),
-                ))
-            })?;
+        // TODO(gloas): check these assumptions.. exactly what the most efficient way to verify the signatures
+        //              in this case isn't clear. There are questions about the proposer cache, the pubkey cache,
+        //              and so on.
 
-        // verify the signature
-        if !signed_envelope.verify_signature(&parent_state, &chain.spec)? {
+        // get the fork from the cache so we can verify the signature
+        let block_slot = envelope.slot();
+        let block_epoch = block_slot.epoch(T::EthSpec::slots_per_epoch());
+        let proposer_shuffling_decision_block =
+            parent_proto_block.proposer_shuffling_root_for_child_block(block_epoch, &chain.spec);
+        let mut opt_parent = None;
+        let envelope_ref = signed_envelope.as_ref();
+        let proposer = chain.with_proposer_cache::<_, EnvelopeError>(
+            proposer_shuffling_decision_block,
+            block_epoch,
+            |proposers| proposers.get_slot::<T::EthSpec>(block_slot),
+            || {
+                debug!(
+                    %beacon_block_root,
+                    block_hash = %envelope_ref.block_hash(),
+                    "Proposer shuffling cache miss for envelope verification"
+                );
+                // The proposer index was *not* cached and we must load the parent in order to
+                // determine the proposer index.
+                let snapshot = load_snapshot(envelope_ref, chain)?;
+                opt_parent = Some(Box::new(snapshot.clone()));
+                Ok((snapshot.state_root, snapshot.pre_state))
+            },
+        )?;
+        let fork = proposer.fork;
+
+        let signature_is_valid = {
+            let pubkey_cache = chain.validator_pubkey_cache.read();
+            let builder_pubkey = pubkey_cache
+                .get(envelope.builder_index() as usize)
+                .ok_or_else(|| EnvelopeError::UnknownValidator {
+                    builder_index: envelope.builder_index(),
+                })?;
+            signed_envelope.verify_signature(
+                &builder_pubkey,
+                &fork,
+                chain.genesis_validators_root,
+                &chain.spec,
+            )
+        };
+
+        if !signature_is_valid {
             return Err(EnvelopeError::BadSignature);
         }
 
         Ok(Self {
             signed_envelope,
             parent_block,
-            pre_state: Box::new(parent_state),
+            parent: opt_parent,
         })
     }
 
@@ -285,103 +367,6 @@ impl<T: BeaconChainTypes> IntoExecutionPendingEnvelope<T> for GossipVerifiedEnve
         let envelope = signed_envelope.message();
         let payload = &envelope.payload();
 
-        // verify signature already done
-        let mut state = *self.pre_state;
-
-        // all state modifications are done in envelope_processing (called at the bottom of this function)
-        // so here perform the consistency check with the beacon block on a copy of the latest block header
-        // and let it be modified later in envelope_processing
-        let previous_state_root = state.canonical_root()?;
-        if state.latest_block_header().state_root == Hash256::default() {
-            let mut copy_of_latest_block_header = state.latest_block_header().clone();
-            copy_of_latest_block_header.state_root = previous_state_root;
-
-            // Verify consistency with the beacon block
-            if !envelope.beacon_block_root() == copy_of_latest_block_header.tree_hash_root() {
-                return Err(EnvelopeError::LatestBlockHeaderMismatch {
-                    envelope_root: envelope.beacon_block_root(),
-                    block_header_root: copy_of_latest_block_header.tree_hash_root(),
-                });
-            };
-        }
-
-        // the check about the slots matching is already done in the GossipVerifiedEnvelope
-
-        // Verify consistency with the committed bid
-        let committed_bid = state.latest_execution_bid()?;
-        // builder index match already verified
-        if committed_bid.blob_kzg_commitments_root
-            != envelope.blob_kzg_commitments().tree_hash_root()
-        {
-            return Err(EnvelopeError::BlobKzgCommitmentsRootMismatch {
-                committed_bid: committed_bid.blob_kzg_commitments_root,
-                envelope: envelope.blob_kzg_commitments().tree_hash_root(),
-            });
-        };
-
-        // Verify the withdrawals root
-        envelope_verify!(
-            payload.withdrawals()?.tree_hash_root() == *state.latest_withdrawals_root()?,
-            EnvelopeError::WithdrawalsRootMismatch {
-                state: *state.latest_withdrawals_root()?,
-                envelope: payload.withdrawals()?.tree_hash_root(),
-            }
-            .into()
-        );
-
-        // Verify the gas limit
-        envelope_verify!(
-            payload.gas_limit() == committed_bid.gas_limit,
-            EnvelopeError::GasLimitMismatch {
-                committed_bid: committed_bid.gas_limit,
-                envelope: payload.gas_limit(),
-            }
-            .into()
-        );
-        // Verify the block hash already done in the GossipVerifiedEnvelope
-
-        // Verify consistency of the parent hash with respect to the previous execution payload
-        envelope_verify!(
-            payload.parent_hash() == *state.latest_block_hash()?,
-            EnvelopeError::ParentHashMismatch {
-                state: *state.latest_block_hash()?,
-                envelope: payload.parent_hash(),
-            }
-            .into()
-        );
-
-        // Verify prev_randao
-        envelope_verify!(
-            payload.prev_randao() == *state.get_randao_mix(state.current_epoch())?,
-            EnvelopeError::PrevRandaoMismatch {
-                state: *state.get_randao_mix(state.current_epoch())?,
-                envelope: payload.prev_randao(),
-            }
-            .into()
-        );
-
-        // Verify the timestamp
-        let state_timestamp = compute_timestamp_at_slot(&state, state.slot(), chain.spec.as_ref())?;
-        envelope_verify!(
-            payload.timestamp() == state_timestamp,
-            EnvelopeError::TimestampMismatch {
-                state: state_timestamp,
-                envelope: payload.timestamp(),
-            }
-            .into()
-        );
-
-        // Verify the commitments are under limit
-        let max_blobs = chain.spec.max_blobs_per_block(state.current_epoch()) as usize;
-        envelope_verify!(
-            envelope.blob_kzg_commitments().len() <= max_blobs,
-            EnvelopeError::BlobLimitExceeded {
-                max: max_blobs,
-                envelope: envelope.blob_kzg_commitments().len(),
-            }
-            .into()
-        );
-
         // Verify the execution payload is valid
         let payload_notifier =
             PayloadNotifier::from_envelope(chain.clone(), envelope, notify_execution_layer)?;
@@ -390,7 +375,7 @@ impl<T: BeaconChainTypes> IntoExecutionPendingEnvelope<T> for GossipVerifiedEnve
 
         let payload_verification_future = async move {
             let chain = payload_notifier.chain.clone();
-            // TODO:(gloas): timing
+            // TODO:(gloas): timing metrics
             if let Some(started_execution) = chain.slot_clock.now_duration() {
                 chain.block_times_cache.write().set_time_started_execution(
                     block_root,
@@ -417,22 +402,22 @@ impl<T: BeaconChainTypes> IntoExecutionPendingEnvelope<T> for GossipVerifiedEnve
             )
             .ok_or(BeaconChainError::RuntimeShutdown)?;
 
+        let parent = if let Some(snapshot) = self.parent {
+            *snapshot
+        } else {
+            load_snapshot(signed_envelope.as_ref(), chain)?
+        };
+        let mut state = parent.pre_state;
+
         // All the state modifications are done in envelope_processing
         envelope_processing(
             &mut state,
+            Some(parent.state_root),
             &signed_envelope,
+            // verify signature already done for GossipVerifiedEnvelope
             VerifySignatures::False,
             &chain.spec,
         )?;
-
-        // TODO(gloas): if verify
-        envelope_verify!(
-            state.canonical_root()? == envelope.state_root(),
-            EnvelopeError::InvalidStateRoot {
-                state: state.canonical_root()?,
-                envelope: envelope.state_root(),
-            }
-        );
 
         Ok(ExecutionPendingEnvelope {
             signed_envelope: MaybeAvailableEnvelope::AvailabilityPending {

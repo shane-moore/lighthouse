@@ -69,6 +69,10 @@ impl<'a, E: EthSpec> ExecutionPayloadEnvelopeRef<'a, E> {
             Self::NextFork(envelope) => ExecutionPayloadRef::Gloas(&envelope.payload),
         }
     }
+
+    pub fn block_hash(&self) -> ExecutionBlockHash {
+        self.payload().block_hash()
+    }
 }
 
 impl<'de, E: EthSpec> ContextDeserialize<'de, ForkName> for ExecutionPayloadEnvelope<E> {

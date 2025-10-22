@@ -75,11 +75,28 @@ impl<E: EthSpec> SignedExecutionPayloadEnvelope<E> {
         }
     }
 
+    pub fn slot(&self) -> Slot {
+        self.message().slot()
+    }
+
+    pub fn epoch(&self) -> Epoch {
+        self.slot().epoch(E::slots_per_epoch())
+    }
+
+    pub fn beacon_block_root(&self) -> Hash256 {
+        self.message().beacon_block_root()
+    }
+
+    pub fn block_hash(&self) -> ExecutionBlockHash {
+        self.message().block_hash()
+    }
+
     /// Verify `self.signature`.
     ///
     /// The `parent_state` is the post-state of the beacon block with
     /// block_root = self.message.beacon_block_root
-    pub fn verify_signature(
+    /// todo(gloas): maybe delete this function later
+    pub fn verify_signature_with_state(
         &self,
         parent_state: &BeaconState<E>,
         spec: &ChainSpec,
@@ -103,6 +120,29 @@ impl<E: EthSpec> SignedExecutionPayloadEnvelope<E> {
         let message = self.message().signing_root(domain);
 
         Ok(self.signature().verify(&pubkey, message))
+    }
+
+    /// Verify `self.signature`.
+    ///
+    /// If the root of `block.message` is already known it can be passed in via `object_root_opt`.
+    /// Otherwise, it will be computed locally.
+    pub fn verify_signature(
+        &self,
+        pubkey: &PublicKey,
+        fork: &Fork,
+        genesis_validators_root: Hash256,
+        spec: &ChainSpec,
+    ) -> bool {
+        let domain = spec.get_domain(
+            self.epoch(),
+            Domain::BeaconProposer,
+            fork,
+            genesis_validators_root,
+        );
+
+        let message = self.message().signing_root(domain);
+
+        self.signature().verify(pubkey, message)
     }
 }
 
