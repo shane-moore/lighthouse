@@ -568,13 +568,15 @@ pub fn get_expected_withdrawals<E: EthSpec>(
                         0
                     };
 
-                    withdrawals.push(Withdrawal {
-                        index: withdrawal_index,
-                        validator_index: withdrawal.builder_index,
-                        address: withdrawal.fee_recipient,
-                        amount: withdrawable_balance,
-                    });
-                    withdrawal_index.safe_add_assign(1)?;
+                    if withdrawable_balance > 0 {
+                        withdrawals.push(Withdrawal {
+                            index: withdrawal_index,
+                            validator_index: withdrawal.builder_index,
+                            address: withdrawal.fee_recipient,
+                            amount: withdrawable_balance,
+                        });
+                        withdrawal_index.safe_add_assign(1)?;
+                    }
                 }
                 processed_builder_withdrawals_count.safe_add_assign(1)?;
             }
