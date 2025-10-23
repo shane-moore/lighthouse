@@ -95,7 +95,7 @@ impl<E: EthSpec> SignedExecutionPayloadEnvelope<E> {
     ///
     /// The `parent_state` is the post-state of the beacon block with
     /// block_root = self.message.beacon_block_root
-    /// todo(gloas): maybe delete this function later
+    /// TODO(EIP-7732): maybe delete this function later
     pub fn verify_signature_with_state(
         &self,
         parent_state: &BeaconState<E>,

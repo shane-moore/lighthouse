@@ -11,7 +11,7 @@ use types::{
     Hash256, SignedExecutionPayloadEnvelope, Slot,
 };
 
-// TODO(gloas): don't use this redefinition..
+// TODO(EIP-7732): don't use this redefinition..
 macro_rules! envelope_verify {
     ($condition: expr, $result: expr) => {
         if !$condition {
@@ -118,7 +118,7 @@ pub fn envelope_processing<E: EthSpec>(
 ) -> Result<(), EnvelopeProcessingError> {
     if verify_signatures.is_true() {
         // Verify Signed Envelope Signature
-        // TODO(gloas): there is probably a more efficient way to do this..
+        // TODO(EIP-7732): there is probably a more efficient way to do this..
         if !signed_envelope.verify_signature_with_state(&state, spec)? {
             return Err(EnvelopeProcessingError::BadSignature);
         }

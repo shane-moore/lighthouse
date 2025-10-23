@@ -157,7 +157,7 @@ fn load_snapshot<T: BeaconChainTypes>(
     };
     drop(fork_choice_read_lock);
 
-    // TODO(gloas): add metrics here
+    // TODO(EIP-7732): add metrics here
 
     let result = {
         // Load the parent block's state from the database, returning an error if it is not found.
@@ -167,9 +167,9 @@ fn load_snapshot<T: BeaconChainTypes>(
         // prior to the finalized slot (which is invalid and inaccessible in our DB schema).
         let (parent_state_root, state) = chain
             .store
-            // TODO(gloas): the state doesn't need to be advanced here because we're applying an envelope
-            //              but this function does use a lot of caches that could be more efficient. Is there
-            //              a better way to do this?
+            // TODO(EIP-7732): the state doesn't need to be advanced here because we're applying an envelope
+            //                 but this function does use a lot of caches that could be more efficient. Is there
+            //                 a better way to do this?
             .get_advanced_hot_state(
                 beacon_block_root,
                 proto_beacon_block.slot,
@@ -225,7 +225,7 @@ impl<T: BeaconChainTypes> GossipVerifiedEnvelope<T> {
         let beacon_block_root = envelope.beacon_block_root();
 
         // check that we've seen the parent block of this envelope and that it passes validation
-        // TODO(gloas): this check would fail if the block didn't pass validation right?
+        // TODO(EIP-7732): this check would fail if the block didn't pass validation right?
         let fork_choice_read_lock = chain.canonical_head.fork_choice_read_lock();
         let Some(parent_proto_block) = fork_choice_read_lock.get_block(&beacon_block_root) else {
             return Err(EnvelopeError::BlockRootUnknown {
@@ -234,12 +234,12 @@ impl<T: BeaconChainTypes> GossipVerifiedEnvelope<T> {
         };
         drop(fork_choice_read_lock);
 
-        // TODO(gloas): check that we haven't seen another valid `SignedExecutionPayloadEnvelope`
-        // for this block root from this builder - envelope status table check
+        // TODO(EIP-7732): check that we haven't seen another valid `SignedExecutionPayloadEnvelope`
+        //                 for this block root from this builder - envelope status table check
 
-        // TODO(gloas): this should probably be obtained from the ProtoBlock instead of the DB
-        //              but this means the ProtoBlock needs to include something like the ExecutionBid
-        //              will need to answer this question later.
+        // TODO(EIP-7732): this should probably be obtained from the ProtoBlock instead of the DB
+        //                 but this means the ProtoBlock needs to include something like the ExecutionBid
+        //                 will need to answer this question later.
         let parent_block = chain
             .get_full_block(&beacon_block_root)?
             .ok_or_else(|| {
@@ -252,7 +252,7 @@ impl<T: BeaconChainTypes> GossipVerifiedEnvelope<T> {
             .signed_execution_payload_bid()?
             .message;
 
-        // TODO(gloas): Gossip rules for the beacon block contain the following:
+        // TODO(EIP-7732): Gossip rules for the beacon block contain the following:
         // https://github.com/ethereum/consensus-specs/blob/master/specs/phase0/p2p-interface.md#beacon_block
         // [IGNORE] The block is not from a future slot (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance)
         // [IGNORE] The block is from a slot greater than the latest finalized slot
@@ -282,9 +282,9 @@ impl<T: BeaconChainTypes> GossipVerifiedEnvelope<T> {
             });
         }
 
-        // TODO(gloas): check these assumptions.. exactly what the most efficient way to verify the signatures
-        //              in this case isn't clear. There are questions about the proposer cache, the pubkey cache,
-        //              and so on.
+        // TODO(EIP-7732): check these assumptions.. exactly what the most efficient way to verify the signatures
+        //                 in this case isn't clear. There are questions about the proposer cache, the pubkey cache,
+        //                 and so on.
 
         // get the fork from the cache so we can verify the signature
         let block_slot = envelope.slot();
@@ -442,7 +442,7 @@ impl<T: BeaconChainTypes> IntoExecutionPendingEnvelope<T>
         chain: &Arc<BeaconChain<T>>,
         notify_execution_layer: NotifyExecutionLayer,
     ) -> Result<ExecutionPendingEnvelope<T>, EnvelopeError> {
-        // TODO(gloas): figure out how this should be refactored..
+        // TODO(EIP-7732): figure out how this should be refactored..
         GossipVerifiedEnvelope::new(self, chain)?
             .into_execution_pending_envelope(chain, notify_execution_layer)
     }
