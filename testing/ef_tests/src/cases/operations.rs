@@ -14,10 +14,11 @@ use state_processing::{
     per_block_processing::{
         VerifyBlockRoot, VerifySignatures,
         errors::BlockProcessingError,
+        process_attestations::{altair_gloas, base},
         process_block_header, process_execution_payload,
         process_operations::{
-            altair_deneb, base, process_attester_slashings, process_bls_to_execution_changes,
-            process_deposits, process_exits, process_proposer_slashings,
+            process_attester_slashings, process_bls_to_execution_changes, process_deposits,
+            process_exits, process_proposer_slashings,
         },
         process_sync_aggregate, process_withdrawals,
     },
@@ -101,7 +102,7 @@ impl<E: EthSpec> Operation<E> for Attestation<E> {
         let mut ctxt = ConsensusContext::new(state.slot());
         if state.fork_name_unchecked().altair_enabled() {
             initialize_progressive_balances_cache(state, spec)?;
-            altair_deneb::process_attestation(
+            altair_gloas::altair::process_attestation(
                 state,
                 self.to_ref(),
                 0,

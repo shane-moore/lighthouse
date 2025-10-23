@@ -91,6 +91,8 @@ pub enum BlockProcessingError {
     },
     WithdrawalCredentialsInvalid,
     PendingAttestationInElectra,
+    /// Builder payment index out of bounds (Gloas)
+    BuilderPaymentIndexOutOfBounds(usize),
 }
 
 impl From<BeaconStateError> for BlockProcessingError {

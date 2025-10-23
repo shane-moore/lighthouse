@@ -1,4 +1,5 @@
 use integer_sqrt::IntegerSquareRoot;
+use safe_arith::SafeArith;
 use smallvec::SmallVec;
 use types::{AttestationData, BeaconState, ChainSpec, EthSpec};
 use types::{
@@ -49,7 +50,10 @@ pub fn get_attestation_participation_flag_indices<E: EthSpec>(
         } else {
             // For non same-slot attestations, check execution payload availability
             // TODO(EIP7732) Discuss if we want to return new error BeaconStateError::InvalidExecutionPayloadAvailabilityIndex here for bit out of bounds or use something like BeaconStateError::InvalidBitfield
-            let slot_index = data.slot.as_usize() % E::slots_per_historical_root();
+            let slot_index = data
+                .slot
+                .as_usize()
+                .safe_rem(E::slots_per_historical_root())?;
             state
                 .execution_payload_availability()?
                 .get(slot_index)
