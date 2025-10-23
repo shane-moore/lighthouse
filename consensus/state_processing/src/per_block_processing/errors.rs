@@ -98,6 +98,8 @@ pub enum BlockProcessingError {
     ExecutionPayloadBidInvalid {
         reason: ExecutionPayloadBidInvalid,
     },
+    /// Builder payment index out of bounds (Gloas)
+    BuilderPaymentIndexOutOfBounds(usize),
 }
 
 impl From<BeaconStateError> for BlockProcessingError {

@@ -36,6 +36,7 @@ pub mod deneb;
 pub mod errors;
 mod is_valid_indexed_attestation;
 mod is_valid_indexed_payload_attestation;
+pub mod process_attestations;
 pub mod process_operations;
 pub mod process_withdrawals;
 pub mod signature_sets;
