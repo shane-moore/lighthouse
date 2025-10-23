@@ -522,7 +522,8 @@ pub fn compute_timestamp_at_slot<E: EthSpec>(
 
 /// Compute the next batch of withdrawals which should be included in a block.
 ///
-/// https://ethereum.github.io/consensus-specs/specs/_features/eip7732/beacon-chain/#modified-get_expected_withdrawals
+/// https://ethereum.github.io/consensus-specs/specs/gloas/beacon-chain/#modified-get_expected_withdrawals
+#[allow(clippy::type_complexity)]
 pub fn get_expected_withdrawals<E: EthSpec>(
     state: &BeaconState<E>,
     spec: &ChainSpec,
@@ -540,7 +541,7 @@ pub fn get_expected_withdrawals<E: EthSpec>(
             let mut processed_builder_withdrawals_count = 0;
             for withdrawal in builder_pending_withdrawals {
                 if withdrawal.withdrawable_epoch > epoch
-                    || withdrawals.len() + 1 == E::max_withdrawals_per_payload()
+                    || withdrawals.len().safe_add(1)? == E::max_withdrawals_per_payload()
                 {
                     break;
                 }

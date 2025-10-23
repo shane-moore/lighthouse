@@ -110,6 +110,13 @@ pub mod capella {
 }
 pub mod gloas {
     use super::*;
+
+    // TODO(EIP-7732): Add comprehensive tests for Gloas `process_withdrawals`:
+    // Similar to Capella version, these will be tested via:
+    // 1. EF consensus-spec tests in `testing/ef_tests/src/cases/operations.rs`
+    // 2. Integration tests via full block processing
+    // These tests would currently fail due to incomplete Gloas block structure as mentioned here, so we will implement them after block and payload processing is in a good state.
+    // https://github.com/sigp/lighthouse/pull/8273
     /// Apply withdrawals to the state.
     pub fn process_withdrawals<E: EthSpec>(
         state: &mut BeaconState<E>,

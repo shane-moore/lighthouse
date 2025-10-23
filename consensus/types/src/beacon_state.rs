@@ -760,21 +760,6 @@ impl<E: EthSpec> BeaconState<E> {
         }
     }
 
-    /// Return true if the parent block was full (both beacon block and execution payload were present).
-    pub fn is_parent_block_full(&self) -> bool {
-        match self {
-            BeaconState::Base(_) | BeaconState::Altair(_) => false,
-            BeaconState::Bellatrix(_)
-            | BeaconState::Capella(_)
-            | BeaconState::Deneb(_)
-            | BeaconState::Electra(_)
-            | BeaconState::Fulu(_) => true,
-            BeaconState::Gloas(state) => {
-                state.latest_execution_payload_bid.block_hash == state.latest_block_hash
-            }
-        }
-    }
-
     /// Returns the `tree_hash_root` of the state.
     pub fn canonical_root(&mut self) -> Result<Hash256, Error> {
         self.update_tree_hash_cache()
@@ -2216,6 +2201,22 @@ impl<E: EthSpec> BeaconState<E> {
             RelativeEpoch::Previous => 0,
             RelativeEpoch::Current => 1,
             RelativeEpoch::Next => 2,
+        }
+    }
+
+    /// Return true if the parent block was full (both beacon block and execution payload were present).
+    pub fn is_parent_block_full(&self) -> bool {
+        match self {
+            BeaconState::Base(_) | BeaconState::Altair(_) => false,
+            // TODO(EIP-7732): check the implications of this when we get to forkchoice modifications
+            BeaconState::Bellatrix(_)
+            | BeaconState::Capella(_)
+            | BeaconState::Deneb(_)
+            | BeaconState::Electra(_)
+            | BeaconState::Fulu(_) => true,
+            BeaconState::Gloas(state) => {
+                state.latest_execution_payload_bid.block_hash == state.latest_block_hash
+            }
         }
     }
 
