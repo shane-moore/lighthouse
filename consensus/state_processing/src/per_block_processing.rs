@@ -29,7 +29,6 @@ pub mod block_signature_verifier;
 pub mod deneb;
 pub mod errors;
 mod is_valid_indexed_attestation;
-pub mod process_attestations;
 pub mod process_operations;
 pub mod signature_sets;
 pub mod tests;

@@ -43,8 +43,7 @@ pub fn get_attestation_participation_flag_indices<E: EthSpec>(
         let is_matching_payload = if is_attestation_same_slot(state, data)? {
             // For same-slot attestations, data.index must be 0
             if data.index != 0 {
-                // TODO(EIP7732): consider if we want to use a different error type, since this is more of an overloaded data index scenario as opposed to the InvalidCommitteeIndex previous error. It's more like `AttestationInvalid::BadOverloadedDataIndex`
-                return Err(Error::InvalidCommitteeIndex(data.index));
+                return Err(Error::BadOverloadedDataIndex(data.index));
             }
             true
         } else {
