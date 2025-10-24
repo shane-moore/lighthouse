@@ -175,6 +175,8 @@ pub enum BeaconStateError {
     NonExecutionAddressWithdrawalCredential,
     NoCommitteeFound(CommitteeIndex),
     InvalidCommitteeIndex(CommitteeIndex),
+    /// `Attestation.data.index` field is invalid in overloaded data index scenario.
+    BadOverloadedDataIndex(u64),
     InvalidSelectionProof {
         aggregator_index: u64,
     },
