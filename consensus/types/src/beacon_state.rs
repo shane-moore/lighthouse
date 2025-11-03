@@ -1090,6 +1090,7 @@ impl<E: EthSpec> BeaconState<E> {
             }
         }
 
+        let gloas_enabled = self.fork_name_unchecked().gloas_enabled();
         epoch
             .slot_iter(E::slots_per_epoch())
             .map(|slot| {
@@ -1097,7 +1098,7 @@ impl<E: EthSpec> BeaconState<E> {
                 preimage.append(&mut int_to_bytes8(slot.as_u64()));
                 let seed = hash(&preimage);
 
-                if self.fork_name_unchecked().gloas_enabled() {
+                if gloas_enabled {
                     self.compute_balance_weighted_selection(indices, &seed, 1, true, spec)?
                         .first()
                         .copied()
@@ -2819,7 +2820,7 @@ impl<E: EthSpec> BeaconState<E> {
             spec,
         )?;
 
-        Ok(PTC(FixedVector::from(selected_indices)))
+        Ok(PTC(FixedVector::new(selected_indices)?))
     }
 
     /// Compute the seed to use for the ptc attester selection at the given `slot`.
@@ -2885,6 +2886,11 @@ impl<E: EthSpec> BeaconState<E> {
         iteration: usize,
         spec: &ChainSpec,
     ) -> Result<bool, Error> {
+        // TODO(EIP-7732): Consider grabbing effective balances from the epoch cache here.
+        // Note that this function will be used in a loop, so using cached values could be nice for performance.
+        // However, post-gloas, this function will be used in `compute_proposer_indices`, `get_next_sync_committee_indices`, and `get_ptc`, which has ~15 call sites in total
+        // so we will need to check each one to ensure epoch cache is initialized first, if we deem a good idea.
+        // Currently, we can't test if making the change would work since the test suite is not ready for gloas.
         let effective_balance = self.get_effective_balance(index)?;
         let max_effective_balance = spec.max_effective_balance_for_fork(self.fork_name_unchecked());
 

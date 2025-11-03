@@ -9,11 +9,12 @@ use tree_hash::TreeHash;
 use types::{
     AbstractExecPayload, AggregateSignature, AttesterSlashingRef, BeaconBlockRef, BeaconState,
     BeaconStateError, ChainSpec, DepositData, Domain, Epoch, EthSpec, Fork, Hash256,
-    IndexedAttestation, IndexedAttestationRef, IndexedPayloadAttestation, ProposerSlashing,
-    PublicKey, PublicKeyBytes, Signature, SignedAggregateAndProof, SignedBeaconBlock,
-    SignedBeaconBlockHeader, SignedBlsToExecutionChange, SignedContributionAndProof,
-    SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope, SignedRoot, SignedVoluntaryExit,
-    SigningData, Slot, SyncAggregate, SyncAggregatorSelectionData, Unsigned,
+    InconsistentFork, IndexedAttestation, IndexedAttestationRef, IndexedPayloadAttestation,
+    ProposerSlashing, PublicKey, PublicKeyBytes, Signature, SignedAggregateAndProof,
+    SignedBeaconBlock, SignedBeaconBlockHeader, SignedBlsToExecutionChange,
+    SignedContributionAndProof, SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope,
+    SignedRoot, SignedVoluntaryExit, SigningData, Slot, SyncAggregate, SyncAggregatorSelectionData,
+    Unsigned,
 };
 
 pub type Result<T> = std::result::Result<T, Error>;
