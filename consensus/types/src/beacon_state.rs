@@ -2204,6 +2204,7 @@ impl<E: EthSpec> BeaconState<E> {
         }
     }
 
+    /// Return true if the parent block was full (both beacon block and execution payload were present).
     pub fn is_parent_block_full(&self) -> bool {
         match self {
             BeaconState::Base(_) | BeaconState::Altair(_) => false,
