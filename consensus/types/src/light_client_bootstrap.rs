@@ -234,17 +234,7 @@ impl<E: EthSpec> LightClientBootstrap<E> {
                     .try_into()
                     .map_err(Error::SszTypesError)?,
             }),
-<<<<<<< HEAD
             ForkName::Gloas => todo!("Gloas light client not implemented"),
-=======
-            ForkName::Gloas => Self::Gloas(LightClientBootstrapGloas {
-                header: LightClientHeaderGloas::block_to_light_client_header(block)?,
-                current_sync_committee,
-                current_sync_committee_branch: current_sync_committee_branch
-                    .try_into()
-                    .map_err(Error::SszTypesError)?,
-            }),
->>>>>>> 0507eca7b4dfc6e923b02197d3f3f68bdeb1e67c
         };
 
         Ok(light_client_bootstrap)
