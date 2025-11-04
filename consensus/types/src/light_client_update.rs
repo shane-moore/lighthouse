@@ -255,9 +255,11 @@ impl<E: EthSpec> LightClientUpdate<E> {
                 Self::Altair(LightClientUpdateAltair {
                     attested_header,
                     next_sync_committee,
-                    next_sync_committee_branch: next_sync_committee_branch.into(),
+                    next_sync_committee_branch: next_sync_committee_branch
+                        .try_into()
+                        .map_err(Error::SszTypesError)?,
                     finalized_header,
-                    finality_branch: finality_branch.into(),
+                    finality_branch: finality_branch.try_into().map_err(Error::SszTypesError)?,
                     sync_aggregate: sync_aggregate.clone(),
                     signature_slot: block_slot,
                 })
@@ -279,9 +281,11 @@ impl<E: EthSpec> LightClientUpdate<E> {
                 Self::Capella(LightClientUpdateCapella {
                     attested_header,
                     next_sync_committee,
-                    next_sync_committee_branch: next_sync_committee_branch.into(),
+                    next_sync_committee_branch: next_sync_committee_branch
+                        .try_into()
+                        .map_err(Error::SszTypesError)?,
                     finalized_header,
-                    finality_branch: finality_branch.into(),
+                    finality_branch: finality_branch.try_into().map_err(Error::SszTypesError)?,
                     sync_aggregate: sync_aggregate.clone(),
                     signature_slot: block_slot,
                 })
@@ -303,9 +307,11 @@ impl<E: EthSpec> LightClientUpdate<E> {
                 Self::Deneb(LightClientUpdateDeneb {
                     attested_header,
                     next_sync_committee,
-                    next_sync_committee_branch: next_sync_committee_branch.into(),
+                    next_sync_committee_branch: next_sync_committee_branch
+                        .try_into()
+                        .map_err(Error::SszTypesError)?,
                     finalized_header,
-                    finality_branch: finality_branch.into(),
+                    finality_branch: finality_branch.try_into().map_err(Error::SszTypesError)?,
                     sync_aggregate: sync_aggregate.clone(),
                     signature_slot: block_slot,
                 })
@@ -327,9 +333,11 @@ impl<E: EthSpec> LightClientUpdate<E> {
                 Self::Electra(LightClientUpdateElectra {
                     attested_header,
                     next_sync_committee,
-                    next_sync_committee_branch: next_sync_committee_branch.into(),
+                    next_sync_committee_branch: next_sync_committee_branch
+                        .try_into()
+                        .map_err(Error::SszTypesError)?,
                     finalized_header,
-                    finality_branch: finality_branch.into(),
+                    finality_branch: finality_branch.try_into().map_err(Error::SszTypesError)?,
                     sync_aggregate: sync_aggregate.clone(),
                     signature_slot: block_slot,
                 })
@@ -351,9 +359,11 @@ impl<E: EthSpec> LightClientUpdate<E> {
                 Self::Fulu(LightClientUpdateFulu {
                     attested_header,
                     next_sync_committee,
-                    next_sync_committee_branch: next_sync_committee_branch.into(),
+                    next_sync_committee_branch: next_sync_committee_branch
+                        .try_into()
+                        .map_err(Error::SszTypesError)?,
                     finalized_header,
-                    finality_branch: finality_branch.into(),
+                    finality_branch: finality_branch.try_into().map_err(Error::SszTypesError)?,
                     sync_aggregate: sync_aggregate.clone(),
                     signature_slot: block_slot,
                 })
