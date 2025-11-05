@@ -737,57 +737,61 @@ pub fn process_execution_payload_bid<E: EthSpec, Payload: AbstractExecPayload<E>
         }
     }
 
-    // Verify builder is active and not slashed
+    // Verify builder is active
     block_verify!(
         builder.is_active_at(state.current_epoch()),
         ExecutionPayloadBidInvalid::BuilderNotActive(builder_index).into()
     );
-    block_verify!(
-        !builder.slashed,
-        ExecutionPayloadBidInvalid::BuilderSlashed(builder_index).into()
-    );
 
-    // Check that the builder is active, non-slashed, and has funds to cover the bid
-    let pending_payments = state
-        .builder_pending_payments()?
-        .iter()
-        .filter_map(|payment| {
-            if payment.withdrawal.builder_index == builder_index {
-                Some(payment.withdrawal.amount)
-            } else {
-                None
-            }
-        })
-        .safe_sum()?;
+    // Only perform payment related checks if amount > 0
+    if amount > 0 {
+        // Verify builder is not slashed
+        block_verify!(
+            !builder.slashed,
+            ExecutionPayloadBidInvalid::BuilderSlashed(builder_index).into()
+        );
 
-    let pending_withdrawals = state
-        .builder_pending_withdrawals()?
-        .iter()
-        .filter_map(|withdrawal| {
-            if withdrawal.builder_index == builder_index {
-                Some(withdrawal.amount)
-            } else {
-                None
-            }
-        })
-        .safe_sum()?;
+        // Check that the builder has funds to cover the bid
+        let pending_payments = state
+            .builder_pending_payments()?
+            .iter()
+            .filter_map(|payment| {
+                if payment.withdrawal.builder_index == builder_index {
+                    Some(payment.withdrawal.amount)
+                } else {
+                    None
+                }
+            })
+            .safe_sum()?;
 
-    let builder_balance = state.get_balance(builder_index as usize)?;
+        let pending_withdrawals = state
+            .builder_pending_withdrawals()?
+            .iter()
+            .filter_map(|withdrawal| {
+                if withdrawal.builder_index == builder_index {
+                    Some(withdrawal.amount)
+                } else {
+                    None
+                }
+            })
+            .safe_sum()?;
 
-    block_verify!(
-        amount == 0
-            || builder_balance
+        let builder_balance = state.get_balance(builder_index as usize)?;
+
+        block_verify!(
+            builder_balance
                 >= amount
                     .safe_add(pending_payments)?
                     .safe_add(pending_withdrawals)?
                     .safe_add(spec.min_activation_balance)?,
-        ExecutionPayloadBidInvalid::InsufficientBalance {
-            builder_index,
-            builder_balance,
-            bid_value: amount,
-        }
-        .into()
-    );
+            ExecutionPayloadBidInvalid::InsufficientBalance {
+                builder_index,
+                builder_balance,
+                bid_value: amount,
+            }
+            .into()
+        );
+    }
 
     // Verify that the bid is for the current slot
     block_verify!(
