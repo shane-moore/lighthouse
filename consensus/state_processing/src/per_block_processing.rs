@@ -737,20 +737,18 @@ pub fn process_execution_payload_bid<E: EthSpec, Payload: AbstractExecPayload<E>
         }
     }
 
-    // Verify builder is active
+    // Verify builder is active and not slashed
     block_verify!(
         builder.is_active_at(state.current_epoch()),
         ExecutionPayloadBidInvalid::BuilderNotActive(builder_index).into()
     );
+    block_verify!(
+        !builder.slashed,
+        ExecutionPayloadBidInvalid::BuilderSlashed(builder_index).into()
+    );
 
     // Only perform payment related checks if amount > 0
     if amount > 0 {
-        // Verify builder is not slashed
-        block_verify!(
-            !builder.slashed,
-            ExecutionPayloadBidInvalid::BuilderSlashed(builder_index).into()
-        );
-
         // Check that the builder has funds to cover the bid
         let pending_payments = state
             .builder_pending_payments()?
