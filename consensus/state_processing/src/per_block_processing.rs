@@ -1,8 +1,12 @@
+use self::errors::ExecutionPayloadBidInvalid;
 use crate::consensus_context::ConsensusContext;
 use errors::{BlockOperationError, BlockProcessingError, HeaderInvalid};
 use rayon::prelude::*;
 use safe_arith::{ArithError, SafeArith, SafeArithIter};
-use signature_sets::{block_proposal_signature_set, get_pubkey_from_state, randao_signature_set};
+use signature_sets::{
+    block_proposal_signature_set, execution_payload_bid_signature_set, get_pubkey_from_state,
+    randao_signature_set,
+};
 use std::borrow::Cow;
 use tree_hash::TreeHash;
 use types::*;
@@ -173,9 +177,7 @@ pub fn per_block_processing<E: EthSpec, Payload: AbstractExecPayload<E>>(
         let body = block.body();
         if state.fork_name_unchecked().gloas_enabled() {
             process_withdrawals::gloas::process_withdrawals::<E>(state, spec)?;
-
-        // TODO(EIP-7732): build out process_execution_bid
-        // process_execution_bid(state, block, verify_signatures, spec)?;
+            process_execution_payload_bid(state, block, verify_signatures, spec)?;
         } else {
             process_withdrawals::capella::process_withdrawals::<E, Payload>(
                 state,
@@ -625,7 +627,7 @@ pub fn get_expected_withdrawals<E: EthSpec>(
                         index: withdrawal_index,
                         validator_index: withdrawal.validator_index,
                         address: validator
-                            .get_execution_withdrawal_address(spec)
+                            .get_execution_withdrawal_address(spec, state.fork_name_unchecked())
                             .ok_or(BeaconStateError::NonExecutionAddressWithdrawalCredential)?,
                         amount: withdrawable_balance,
                     });
@@ -662,7 +664,7 @@ pub fn get_expected_withdrawals<E: EthSpec>(
                 index: withdrawal_index,
                 validator_index,
                 address: validator
-                    .get_execution_withdrawal_address(spec)
+                    .get_execution_withdrawal_address(spec, state.fork_name_unchecked())
                     .ok_or(BlockProcessingError::WithdrawalCredentialsInvalid)?,
                 amount: balance,
             });
@@ -672,7 +674,7 @@ pub fn get_expected_withdrawals<E: EthSpec>(
                 index: withdrawal_index,
                 validator_index,
                 address: validator
-                    .get_execution_withdrawal_address(spec)
+                    .get_execution_withdrawal_address(spec, state.fork_name_unchecked())
                     .ok_or(BlockProcessingError::WithdrawalCredentialsInvalid)?,
                 amount: balance.safe_sub(validator.get_max_effective_balance(spec, fork_name))?,
             });
@@ -691,4 +693,160 @@ pub fn get_expected_withdrawals<E: EthSpec>(
         processed_builder_withdrawals_count,
         processed_partial_withdrawals_count,
     ))
+}
+
+pub fn process_execution_payload_bid<E: EthSpec, Payload: AbstractExecPayload<E>>(
+    state: &mut BeaconState<E>,
+    block: BeaconBlockRef<'_, E, Payload>,
+    verify_signatures: VerifySignatures,
+    spec: &ChainSpec,
+) -> Result<(), BlockProcessingError> {
+    // Verify the bid signature
+    let signed_bid = block.body().signed_execution_payload_bid()?;
+
+    let bid = &signed_bid.message;
+    let amount = bid.value;
+    let builder_index = bid.builder_index;
+    let builder = state.get_validator(builder_index as usize)?;
+
+    // For self-builds, amount must be zero regardless of withdrawal credential prefix
+    if builder_index == block.proposer_index() {
+        block_verify!(amount == 0, ExecutionPayloadBidInvalid::BadAmount.into());
+        // TODO(EIP-7732): check with team if we should use ExecutionPayloadBidInvalid::BadSignature or a new error variant for this, like BadSelfBuildSignature
+        block_verify!(
+            signed_bid.signature.is_infinity(),
+            ExecutionPayloadBidInvalid::BadSignature.into()
+        );
+    } else {
+        // Non-self builds require builder withdrawal credential
+        block_verify!(
+            builder.has_builder_withdrawal_credential(spec),
+            ExecutionPayloadBidInvalid::BadWithdrawalCredentials.into()
+        );
+        if verify_signatures.is_true() {
+            block_verify!(
+                execution_payload_bid_signature_set(
+                    state,
+                    |i| get_pubkey_from_state(state, i),
+                    signed_bid,
+                    spec
+                )?
+                .verify(),
+                ExecutionPayloadBidInvalid::BadSignature.into()
+            );
+        }
+    }
+
+    // Verify builder is active and not slashed
+    block_verify!(
+        builder.is_active_at(state.current_epoch()),
+        ExecutionPayloadBidInvalid::BuilderNotActive(builder_index).into()
+    );
+    block_verify!(
+        !builder.slashed,
+        ExecutionPayloadBidInvalid::BuilderSlashed(builder_index).into()
+    );
+
+    // Only perform payment related checks if amount > 0
+    if amount > 0 {
+        // Check that the builder has funds to cover the bid
+        let pending_payments = state
+            .builder_pending_payments()?
+            .iter()
+            .filter_map(|payment| {
+                if payment.withdrawal.builder_index == builder_index {
+                    Some(payment.withdrawal.amount)
+                } else {
+                    None
+                }
+            })
+            .safe_sum()?;
+
+        let pending_withdrawals = state
+            .builder_pending_withdrawals()?
+            .iter()
+            .filter_map(|withdrawal| {
+                if withdrawal.builder_index == builder_index {
+                    Some(withdrawal.amount)
+                } else {
+                    None
+                }
+            })
+            .safe_sum()?;
+
+        let builder_balance = state.get_balance(builder_index as usize)?;
+
+        block_verify!(
+            builder_balance
+                >= amount
+                    .safe_add(pending_payments)?
+                    .safe_add(pending_withdrawals)?
+                    .safe_add(spec.min_activation_balance)?,
+            ExecutionPayloadBidInvalid::InsufficientBalance {
+                builder_index,
+                builder_balance,
+                bid_value: amount,
+            }
+            .into()
+        );
+    }
+
+    // Verify that the bid is for the current slot
+    block_verify!(
+        bid.slot == block.slot(),
+        ExecutionPayloadBidInvalid::SlotMismatch {
+            state_slot: block.slot(),
+            bid_slot: bid.slot,
+        }
+        .into()
+    );
+
+    // Verify that the bid is for the right parent block
+    let latest_block_hash = state.latest_block_hash()?;
+    block_verify!(
+        bid.parent_block_hash == *latest_block_hash,
+        ExecutionPayloadBidInvalid::ParentBlockHashMismatch {
+            state_block_hash: *latest_block_hash,
+            bid_parent_hash: bid.parent_block_hash,
+        }
+        .into()
+    );
+
+    block_verify!(
+        bid.parent_block_root == block.parent_root(),
+        ExecutionPayloadBidInvalid::ParentBlockRootMismatch {
+            block_parent_root: block.parent_root(),
+            bid_parent_root: bid.parent_block_root,
+        }
+        .into()
+    );
+
+    // Record the pending payment if there is some payment
+    if amount > 0 {
+        let pending_payment = BuilderPendingPayment {
+            weight: 0,
+            withdrawal: BuilderPendingWithdrawal {
+                fee_recipient: bid.fee_recipient,
+                amount,
+                builder_index,
+                withdrawable_epoch: spec.far_future_epoch,
+            },
+        };
+
+        let payment_index = (E::slots_per_epoch()
+            .safe_add(bid.slot.as_u64().safe_rem(E::slots_per_epoch())?)?)
+            as usize;
+
+        *state
+            .builder_pending_payments_mut()?
+            .get_mut(payment_index)
+            .ok_or(BlockProcessingError::BeaconStateError(
+                BeaconStateError::BuilderPendingPaymentsIndexNotSupported(payment_index),
+            ))? = pending_payment;
+    }
+
+    // Cache the execution bid
+    *state.latest_execution_payload_bid_mut()? = bid.clone();
+
+    Ok(())
 }
