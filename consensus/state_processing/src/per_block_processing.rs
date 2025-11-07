@@ -689,7 +689,9 @@ pub fn get_expected_withdrawals<E: EthSpec>(
     }
 
     Ok((
-        withdrawals.into(),
+        withdrawals
+            .try_into()
+            .map_err(BlockProcessingError::SszTypesError)?,
         processed_builder_withdrawals_count,
         processed_partial_withdrawals_count,
     ))

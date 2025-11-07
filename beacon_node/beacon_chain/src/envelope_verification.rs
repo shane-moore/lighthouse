@@ -31,7 +31,7 @@ use crate::block_verification::{PayloadVerificationHandle, PayloadVerificationOu
 use crate::envelope_verification_types::{EnvelopeImportData, MaybeAvailableEnvelope};
 use crate::execution_payload::PayloadNotifier;
 use crate::{BeaconChain, BeaconChainError, BeaconChainTypes};
-use derivative::Derivative;
+use educe::Educe;
 use slot_clock::SlotClock;
 use state_processing::envelope_processing::{EnvelopeProcessingError, envelope_processing};
 use state_processing::{BlockProcessingError, VerifySignatures};
@@ -207,8 +207,8 @@ fn load_snapshot<T: BeaconChainTypes>(
 
 /// A wrapper around a `SignedExecutionPayloadEnvelope` that indicates it has been approved for re-gossiping on
 /// the p2p network.
-#[derive(Derivative)]
-#[derivative(Debug(bound = "T: BeaconChainTypes"))]
+#[derive(Educe)]
+#[educe(Debug(bound = "T: BeaconChainTypes"))]
 pub struct GossipVerifiedEnvelope<T: BeaconChainTypes> {
     pub signed_envelope: Arc<SignedExecutionPayloadEnvelope<T::EthSpec>>,
     pub parent_block: Arc<SignedBeaconBlock<T::EthSpec>>,

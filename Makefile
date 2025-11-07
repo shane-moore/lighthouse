@@ -30,17 +30,13 @@ TEST_FEATURES ?=
 # Cargo profile for regular builds.
 PROFILE ?= release
 
-# List of all hard forks. This list is used to set env variables for several tests so that
-# they run for different forks.
-FORKS=phase0 altair bellatrix capella deneb electra fulu gloas
-
 # List of all hard forks up to gloas. This list is used to set env variables for several tests so that
 # they run for different forks.
-# TODO(EIP-7732) Remove this once we extend network tests to support gloas
-FORKS_BEFORE_GLOAS=phase0 altair bellatrix capella deneb electra fulu
+# TODO(EIP-7732) Remove this once we extend network tests to support gloas and use RECENT_FORKS instead
+RECENT_FORKS_BEFORE_GLOAS=electra fulu
 
 # List of all recent hard forks. This list is used to set env variables for http_api tests
-RECENT_FORKS=electra fulu
+RECENT_FORKS=electra fulu gloas
 
 # Extra flags for Cargo
 CARGO_INSTALL_EXTRA_FLAGS?=
@@ -176,21 +172,21 @@ run-ef-tests:
 	./$(EF_TESTS)/check_all_files_accessed.py $(EF_TESTS)/.accessed_file_log.txt $(EF_TESTS)/consensus-spec-tests
 
 # Run the tests in the `beacon_chain` crate for all known forks.
-# TODO(EIP-7732) Extend to support gloas
-test-beacon-chain: $(patsubst %,test-beacon-chain-%,$(FORKS_BEFORE_GLOAS))
+# TODO(EIP-7732) Extend to support gloas by using RECENT_FORKS instead
+test-beacon-chain: $(patsubst %,test-beacon-chain-%,$(RECENT_FORKS_BEFORE_GLOAS))
 
 test-beacon-chain-%:
 	env FORK_NAME=$* cargo nextest run --release --features "fork_from_env,slasher/lmdb,$(TEST_FEATURES)" -p beacon_chain
 
 # Run the tests in the `http_api` crate for recent forks.
-test-http-api: $(patsubst %,test-http-api-%,$(RECENT_FORKS))
+test-http-api: $(patsubst %,test-http-api-%,$(RECENT_FORKS_BEFORE_GLOAS))
 
 test-http-api-%:
 	env FORK_NAME=$* cargo nextest run --release --features "beacon_chain/fork_from_env" -p http_api
 
 
 # Run the tests in the `operation_pool` crate for all known forks.
-test-op-pool: $(patsubst %,test-op-pool-%,$(FORKS))
+test-op-pool: $(patsubst %,test-op-pool-%,$(RECENT_FORKS_BEFORE_GLOAS))
 
 test-op-pool-%:
 	env FORK_NAME=$* cargo nextest run --release \
@@ -198,8 +194,8 @@ test-op-pool-%:
 		-p operation_pool
 
 # Run the tests in the `network` crate for all known forks.
-# TODO(EIP-7732) Extend to support gloas
-test-network: $(patsubst %,test-network-%,$(FORKS_BEFORE_GLOAS))
+# TODO(EIP-7732) Extend to support gloas by using RECENT_FORKS instead
+test-network: $(patsubst %,test-network-%,$(RECENT_FORKS_BEFORE_GLOAS))
 
 test-network-%:
 	env FORK_NAME=$* cargo nextest run --release \
