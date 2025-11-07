@@ -6,7 +6,6 @@ use crate::epoch_cache::initialize_epoch_cache;
 use crate::per_epoch_processing::single_pass::{SinglePassConfig, process_epoch_single_pass};
 use crate::per_epoch_processing::{
     capella::process_historical_summaries_update,
-    gloas::process_builder_pending_payments,
     historical_roots_update::process_historical_roots_update,
     resets::{process_eth1_data_reset, process_randao_mixes_reset, process_slashings_reset},
 };
@@ -77,11 +76,6 @@ pub fn process_epoch<E: EthSpec>(
     process_participation_flag_updates(state)?;
 
     process_sync_committee_updates(state, spec)?;
-
-    if state.builder_pending_payments().is_ok() {
-        // Post-Gloas
-        process_builder_pending_payments(state, spec)?;
-    }
 
     // Rotate the epoch caches to suit the epoch transition.
     state.advance_caches()?;

@@ -18,7 +18,6 @@ pub mod capella;
 pub mod effective_balance_updates;
 pub mod epoch_processing_summary;
 pub mod errors;
-pub mod gloas;
 pub mod historical_roots_update;
 pub mod justification_and_finalization_state;
 pub mod registry_updates;
