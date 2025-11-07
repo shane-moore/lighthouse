@@ -179,14 +179,14 @@ test-beacon-chain-%:
 	env FORK_NAME=$* cargo nextest run --release --features "fork_from_env,slasher/lmdb,$(TEST_FEATURES)" -p beacon_chain
 
 # Run the tests in the `http_api` crate for recent forks.
-test-http-api: $(patsubst %,test-http-api-%,$(RECENT_FORKS))
+test-http-api: $(patsubst %,test-http-api-%,$(RECENT_FORKS_BEFORE_GLOAS))
 
 test-http-api-%:
 	env FORK_NAME=$* cargo nextest run --release --features "beacon_chain/fork_from_env" -p http_api
 
 
 # Run the tests in the `operation_pool` crate for all known forks.
-test-op-pool: $(patsubst %,test-op-pool-%,$(RECENT_FORKS))
+test-op-pool: $(patsubst %,test-op-pool-%,$(RECENT_FORKS_BEFORE_GLOAS))
 
 test-op-pool-%:
 	env FORK_NAME=$* cargo nextest run --release \
@@ -195,7 +195,7 @@ test-op-pool-%:
 
 # Run the tests in the `network` crate for all known forks.
 # TODO(EIP-7732) Extend to support gloas by using RECENT_FORKS instead
-test-network: $(patsubst %,test-network-%,$(FORKS_BEFORE_GLOAS))
+test-network: $(patsubst %,test-network-%,$(RECENT_FORKS_BEFORE_GLOAS))
 
 test-network-%:
 	env FORK_NAME=$* cargo nextest run --release \
