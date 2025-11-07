@@ -1,6 +1,6 @@
 use crate::test_utils::TestRandom;
 use crate::*;
-use derivative::Derivative;
+use educe::Educe;
 use serde::de::{Deserializer, Error as _};
 use serde::{Deserialize, Serialize};
 use ssz_derive::{Decode, Encode};
@@ -20,10 +20,10 @@ use tree_hash_derive::TreeHash;
             Decode,
             TreeHash,
             TestRandom,
-            Derivative
+            Educe
         ),
         cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary)),
-        derivative(PartialEq, Hash(bound = "E: EthSpec")),
+        educe(PartialEq, Hash(bound(E: EthSpec))),
         serde(bound = "E: EthSpec", deny_unknown_fields),
         cfg_attr(feature = "arbitrary", arbitrary(bound = "E: EthSpec"))
     ),
@@ -34,8 +34,8 @@ use tree_hash_derive::TreeHash;
     cast_error(ty = "Error", expr = "BeaconStateError::IncorrectStateVariant"),
     partial_getter_error(ty = "Error", expr = "BeaconStateError::IncorrectStateVariant")
 )]
-#[derive(Debug, Clone, Serialize, Encode, Deserialize, TreeHash, Derivative)]
-#[derivative(PartialEq, Hash(bound = "E: EthSpec"))]
+#[derive(Debug, Clone, Serialize, Encode, Deserialize, TreeHash, Educe)]
+#[educe(PartialEq, Hash(bound(E: EthSpec)))]
 #[serde(bound = "E: EthSpec", untagged)]
 #[ssz(enum_behaviour = "transparent")]
 #[tree_hash(enum_behaviour = "transparent")]
