@@ -119,7 +119,7 @@ pub fn envelope_processing<E: EthSpec>(
     if verify_signatures.is_true() {
         // Verify Signed Envelope Signature
         // TODO(EIP-7732): there is probably a more efficient way to do this..
-        if !signed_envelope.verify_signature_with_state(&state, spec)? {
+        if !signed_envelope.verify_signature_with_state(state, spec)? {
             return Err(EnvelopeProcessingError::BadSignature);
         }
     }
@@ -205,18 +205,16 @@ pub fn envelope_processing<E: EthSpec>(
             state: *state.get_randao_mix(state.current_epoch())?,
             envelope: payload.prev_randao(),
         }
-        .into()
     );
 
     // Verify the timestamp
-    let state_timestamp = compute_timestamp_at_slot(&state, state.slot(), spec)?;
+    let state_timestamp = compute_timestamp_at_slot(state, state.slot(), spec)?;
     envelope_verify!(
         payload.timestamp() == state_timestamp,
         EnvelopeProcessingError::TimestampMismatch {
             state: state_timestamp,
             envelope: payload.timestamp(),
         }
-        .into()
     );
 
     // Verify the commitments are under limit
@@ -227,7 +225,6 @@ pub fn envelope_processing<E: EthSpec>(
             max: max_blobs,
             envelope: envelope.blob_kzg_commitments().len(),
         }
-        .into()
     );
 
     // process electra operations
@@ -242,7 +239,9 @@ pub fn envelope_processing<E: EthSpec>(
     let mut payment = state
         .builder_pending_payments()?
         .get(payment_index)
-        .ok_or_else(|| EnvelopeProcessingError::BuilderPaymentIndexOutOfBounds(payment_index))?
+        .ok_or(EnvelopeProcessingError::BuilderPaymentIndexOutOfBounds(
+            payment_index,
+        ))?
         .clone();
     let amount = payment.withdrawal.amount;
     if amount > 0 {
@@ -257,8 +256,9 @@ pub fn envelope_processing<E: EthSpec>(
     *state
         .builder_pending_payments_mut()?
         .get_mut(payment_index)
-        .ok_or_else(|| EnvelopeProcessingError::BuilderPaymentIndexOutOfBounds(payment_index))? =
-        BuilderPendingPayment::default();
+        .ok_or(EnvelopeProcessingError::BuilderPaymentIndexOutOfBounds(
+            payment_index,
+        ))? = BuilderPendingPayment::default();
 
     // cache the execution payload hash
     let availability_index = state
@@ -268,7 +268,7 @@ pub fn envelope_processing<E: EthSpec>(
     state
         .execution_payload_availability_mut()?
         .set(availability_index, true)
-        .map_err(|e| EnvelopeProcessingError::BitFieldError(e))?;
+        .map_err(EnvelopeProcessingError::BitFieldError)?;
     *state.latest_block_hash_mut()? = payload.block_hash();
 
     // verify the state root

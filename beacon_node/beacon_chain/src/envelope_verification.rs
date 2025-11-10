@@ -159,50 +159,46 @@ fn load_snapshot<T: BeaconChainTypes>(
 
     // TODO(EIP-7732): add metrics here
 
-    let result = {
-        // Load the parent block's state from the database, returning an error if it is not found.
-        // It is an error because if we know the parent block we should also know the parent state.
-        // Retrieve any state that is advanced through to at most `block.slot()`: this is
-        // particularly important if `block` descends from the finalized/split block, but at a slot
-        // prior to the finalized slot (which is invalid and inaccessible in our DB schema).
-        let (parent_state_root, state) = chain
-            .store
-            // TODO(EIP-7732): the state doesn't need to be advanced here because we're applying an envelope
-            //                 but this function does use a lot of caches that could be more efficient. Is there
-            //                 a better way to do this?
-            .get_advanced_hot_state(
-                beacon_block_root,
-                proto_beacon_block.slot,
-                proto_beacon_block.state_root,
-            )
-            .map_err(|e| EnvelopeError::BeaconChainError(Arc::new(e.into())))?
-            .ok_or_else(|| {
-                BeaconChainError::DBInconsistent(format!(
-                    "Missing state for parent block {beacon_block_root:?}",
-                ))
-            })?;
-
-        if state.slot() == proto_beacon_block.slot {
-            // Sanity check.
-            if parent_state_root != proto_beacon_block.state_root {
-                return Err(BeaconChainError::DBInconsistent(format!(
-                    "Parent state at slot {} has the wrong state root: {:?} != {:?}",
-                    state.slot(),
-                    parent_state_root,
-                    proto_beacon_block.state_root,
-                ))
-                .into());
-            }
-        }
-
-        Ok(EnvelopeProcessingSnapshot {
-            pre_state: state,
-            state_root: parent_state_root,
+    // Load the parent block's state from the database, returning an error if it is not found.
+    // It is an error because if we know the parent block we should also know the parent state.
+    // Retrieve any state that is advanced through to at most `block.slot()`: this is
+    // particularly important if `block` descends from the finalized/split block, but at a slot
+    // prior to the finalized slot (which is invalid and inaccessible in our DB schema).
+    let (parent_state_root, state) = chain
+        .store
+        // TODO(EIP-7732): the state doesn't need to be advanced here because we're applying an envelope
+        //                 but this function does use a lot of caches that could be more efficient. Is there
+        //                 a better way to do this?
+        .get_advanced_hot_state(
             beacon_block_root,
-        })
-    };
+            proto_beacon_block.slot,
+            proto_beacon_block.state_root,
+        )
+        .map_err(|e| EnvelopeError::BeaconChainError(Arc::new(e.into())))?
+        .ok_or_else(|| {
+            BeaconChainError::DBInconsistent(format!(
+                "Missing state for parent block {beacon_block_root:?}",
+            ))
+        })?;
 
-    result
+    if state.slot() == proto_beacon_block.slot {
+        // Sanity check.
+        if parent_state_root != proto_beacon_block.state_root {
+            return Err(BeaconChainError::DBInconsistent(format!(
+                "Parent state at slot {} has the wrong state root: {:?} != {:?}",
+                state.slot(),
+                parent_state_root,
+                proto_beacon_block.state_root,
+            ))
+            .into());
+        }
+    }
+
+    Ok(EnvelopeProcessingSnapshot {
+        pre_state: state,
+        state_root: parent_state_root,
+        beacon_block_root,
+    })
 }
 
 /// A wrapper around a `SignedExecutionPayloadEnvelope` that indicates it has been approved for re-gossiping on
@@ -320,7 +316,7 @@ impl<T: BeaconChainTypes> GossipVerifiedEnvelope<T> {
                     builder_index: envelope.builder_index(),
                 })?;
             signed_envelope.verify_signature(
-                &builder_pubkey,
+                builder_pubkey,
                 &fork,
                 chain.genesis_validators_root,
                 &chain.spec,
