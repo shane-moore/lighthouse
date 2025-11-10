@@ -279,6 +279,8 @@ impl InvalidPayloadRig {
                 } else {
                     mock_execution_layer.server.full_payload_verification();
                 }
+                // wait for the new payload cache to timeout
+                tokio::time::sleep(std::time::Duration::from_secs(12)).await;
                 let root = self
                     .harness
                     .process_block(slot, block.canonical_root(), (block.clone(), blobs.clone()))
