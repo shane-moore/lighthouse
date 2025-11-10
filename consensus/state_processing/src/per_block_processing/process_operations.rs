@@ -5,6 +5,7 @@ use crate::common::{
     slash_validator,
 };
 use crate::per_block_processing::errors::{BlockProcessingError, IntoWithIndex};
+use crate::per_block_processing::verify_payload_attestation::verify_payload_attestation;
 use types::consts::altair::{PARTICIPATION_FLAG_WEIGHTS, PROPOSER_WEIGHT, WEIGHT_DENOMINATOR};
 use types::typenum::U33;
 
@@ -37,7 +38,15 @@ pub fn process_operations<E: EthSpec, Payload: AbstractExecPayload<E>>(
         process_bls_to_execution_changes(state, bls_to_execution_changes, verify_signatures, spec)?;
     }
 
-    if state.fork_name_unchecked().electra_enabled() {
+    if state.fork_name_unchecked().gloas_enabled() {
+        process_payload_attestations(
+            state,
+            block_body.payload_attestations()?.iter(),
+            verify_signatures,
+            ctxt,
+            spec,
+        )?;
+    } else if state.fork_name_unchecked().electra_enabled() {
         state.update_pubkey_cache()?;
         process_deposit_requests(state, &block_body.execution_requests()?.deposits, spec)?;
         process_withdrawal_requests(state, &block_body.execution_requests()?.withdrawals, spec)?;
@@ -788,4 +797,53 @@ pub fn process_consolidation_request<E: EthSpec>(
         })?;
 
     Ok(())
+}
+
+// TODO(EIP-7732): Add test cases for `process_payload_attestations` to
+// `consensus/state_processing/src/per_block_processing/tests.rs`.
+// The tests will require being able to build Gloas blocks with PayloadAttestations,
+// which currently fails due to incomplete Gloas block structure as mentioned here
+// https://github.com/sigp/lighthouse/pull/8273
+pub fn process_payload_attestation<E: EthSpec>(
+    state: &mut BeaconState<E>,
+    payload_attestation: &PayloadAttestation<E>,
+    att_index: usize,
+    verify_signatures: VerifySignatures,
+    ctxt: &mut ConsensusContext<E>,
+    spec: &ChainSpec,
+) -> Result<(), BlockProcessingError> {
+    verify_payload_attestation(state, payload_attestation, ctxt, verify_signatures, spec)
+        .map_err(|e| e.into_with_index(att_index))
+}
+
+pub fn process_payload_attestations<'a, E: EthSpec, I>(
+    state: &mut BeaconState<E>,
+    payload_attestations: I,
+    verify_signatures: VerifySignatures,
+    ctxt: &mut ConsensusContext<E>,
+    spec: &ChainSpec,
+) -> Result<(), BlockProcessingError>
+where
+    I: Iterator<Item = &'a PayloadAttestation<E>>,
+{
+    // Ensure required caches are all built. These should be no-ops during regular operation.
+    // TODO(EIP-7732): verify necessary caches
+    state.build_committee_cache(RelativeEpoch::Current, spec)?;
+    state.build_committee_cache(RelativeEpoch::Previous, spec)?;
+    initialize_epoch_cache(state, spec)?;
+    initialize_progressive_balances_cache(state, spec)?;
+    state.build_slashings_cache()?;
+
+    payload_attestations
+        .enumerate()
+        .try_for_each(|(i, payload_attestation)| {
+            process_payload_attestation(
+                state,
+                payload_attestation,
+                i,
+                verify_signatures,
+                ctxt,
+                spec,
+            )
+        })
 }
