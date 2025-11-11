@@ -1,7 +1,7 @@
 use super::*;
 use crate::common::{
     get_attestation_participation_flag_indices, increase_balance, initiate_validator_exit,
-    is_attestation_same_slot, slash_validator,
+    slash_validator,
 };
 use crate::per_block_processing::errors::{BlockProcessingError, IntoWithIndex};
 use crate::per_block_processing::verify_payload_attestation::verify_payload_attestation;
@@ -339,7 +339,7 @@ pub mod gloas {
             // Collect validators for Gloas builder payment processing
             // We will only add weight for same-slot attestations when any new flag is set
             // This ensures each validator contributes exactly once per slot
-            if will_set_new_flag && is_attestation_same_slot(state, data)? && payment_amount > 0 {
+            if will_set_new_flag && state.is_attestation_same_slot(data)? && payment_amount > 0 {
                 accumulated_weight.safe_add_assign(validator_effective_balance)?;
             }
         }

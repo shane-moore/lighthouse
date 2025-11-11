@@ -10,8 +10,6 @@ use types::{
     },
 };
 
-use crate::common::is_attestation_same_slot;
-
 /// Get the participation flags for a valid attestation.
 ///
 /// You should have called `verify_attestation_for_block_inclusion` or similar before
@@ -40,7 +38,7 @@ pub fn get_attestation_participation_flag_indices<E: EthSpec>(
         is_matching_target && data.beacon_block_root == *state.get_block_root(data.slot)?;
 
     let is_matching_head = if state.fork_name_unchecked().gloas_enabled() {
-        let is_matching_payload = if is_attestation_same_slot(state, data)? {
+        let is_matching_payload = if state.is_attestation_same_slot(data)? {
             // For same-slot attestations, data.index must be 0
             if data.index != 0 {
                 return Err(Error::BadOverloadedDataIndex(data.index));

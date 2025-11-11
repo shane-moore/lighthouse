@@ -2058,6 +2058,25 @@ impl<E: EthSpec> BeaconState<E> {
         Ok(cache.get_attestation_duties(validator_index))
     }
 
+    /// Check if an attestation is for the same slot as the block it is attesting to.
+    ///
+    /// Returns `true` if the attestation's block root matches the block root at the
+    /// attestation's slot, and the block root differs from the previous slot's root.
+    pub fn is_attestation_same_slot(
+        &self,
+        data: &AttestationData,
+    ) -> Result<bool, BeaconStateError> {
+        if data.slot == 0 {
+            return Ok(true);
+        }
+
+        let is_matching_block_root = &data.beacon_block_root == self.get_block_root(data.slot)?;
+        let is_current_block_root =
+            &data.beacon_block_root != self.get_block_root(data.slot.safe_sub(1)?)?;
+
+        Ok(is_matching_block_root && is_current_block_root)
+    }
+
     /// Compute the total active balance cache from scratch.
     ///
     /// This method should rarely be invoked because single-pass epoch processing keeps the total

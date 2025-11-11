@@ -3,7 +3,6 @@ mod get_attestation_participation;
 mod get_attesting_indices;
 mod get_payload_attesting_indices;
 mod initiate_validator_exit;
-mod is_attestation_same_slot;
 mod slash_validator;
 
 pub mod altair;
@@ -19,7 +18,6 @@ pub use get_payload_attesting_indices::{
     get_indexed_payload_attestation, get_payload_attesting_indices,
 };
 pub use initiate_validator_exit::initiate_validator_exit;
-pub use is_attestation_same_slot::is_attestation_same_slot;
 pub use slash_validator::slash_validator;
 
 use safe_arith::SafeArith;
