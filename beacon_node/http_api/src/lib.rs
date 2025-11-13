@@ -19,6 +19,7 @@ mod metrics;
 mod peer;
 mod produce_block;
 mod proposer_duties;
+mod ptc_duties;
 mod publish_attestations;
 mod publish_blocks;
 mod standard_block_rewards;
@@ -2560,6 +2561,34 @@ pub fn serve<T: BeaconChainTypes>(
         task_spawner_filter.clone(),
     );
 
+    // POST validator/duties/ptc/{epoch}
+    let post_validator_duties_ptc = eth_v1
+        .and(warp::path("validator"))
+        .and(warp::path("duties"))
+        .and(warp::path("ptc"))
+        .and(warp::path::param::<Epoch>().or_else(|_| async {
+            Err(warp_utils::reject::custom_bad_request(
+                "Invalid epoch".to_string(),
+            ))
+        }))
+        .and(warp::path::end())
+        .and(not_while_syncing_filter.clone())
+        .and(warp_utils::json::json())
+        .and(task_spawner_filter.clone())
+        .and(chain_filter.clone())
+        .then(
+            |epoch: Epoch,
+             not_synced_filter: Result<(), Rejection>,
+             indices: api_types::ValidatorIndexData,
+             task_spawner: TaskSpawner<T::EthSpec>,
+             chain: Arc<BeaconChain<T>>| {
+                task_spawner.blocking_json_task(Priority::P0, move || {
+                    not_synced_filter?;
+                    ptc_duties::ptc_duties(epoch, &indices.0, &chain)
+                })
+            },
+        );
+
     // POST validator/duties/sync/{epoch}
     let post_validator_duties_sync = post_validator_duties_sync(
         eth_v1.clone(),
@@ -3410,6 +3439,7 @@ pub fn serve<T: BeaconChainTypes>(
                     .uor(post_beacon_rewards_attestations)
                     .uor(post_beacon_rewards_sync_committee)
                     .uor(post_validator_duties_attester)
+                    .uor(post_validator_duties_ptc)
                     .uor(post_validator_duties_sync)
                     .uor(post_validator_aggregate_and_proofs)
                     .uor(post_validator_contribution_and_proofs)
