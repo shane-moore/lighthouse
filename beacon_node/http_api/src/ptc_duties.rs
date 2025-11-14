@@ -1,9 +1,11 @@
 //! Contains the handler for the `POST validator/duties/ptc/{epoch}` endpoint.
 
+use crate::state_id::StateId;
 use beacon_chain::{BeaconChain, BeaconChainError, BeaconChainTypes};
 use eth2::types::{self as api_types};
 use slot_clock::SlotClock;
-use types::{Epoch, EthSpec, Hash256, PtcDuty};
+use state_processing::state_advance::partial_state_advance;
+use types::{BeaconState, ChainSpec, Epoch, EthSpec, Hash256, PtcDuty, RelativeEpoch};
 
 /// The struct that is returned to the requesting HTTP client.
 type ApiDuties = api_types::DutiesResponse<Vec<PtcDuty>>;
@@ -39,23 +41,41 @@ pub fn ptc_duties<T: BeaconChainTypes>(
             .epoch(T::EthSpec::slots_per_epoch())
     };
 
-    if request_epoch == current_epoch
+    // Check if the request is within acceptable clock tolerance
+    let is_within_clock_tolerance = request_epoch == current_epoch
         || request_epoch == current_epoch + 1
-        || request_epoch == tolerant_current_epoch + 1
-    {
-        compute_ptc_duties(request_epoch, request_indices, chain)
+        || request_epoch == tolerant_current_epoch + 1;
+
+    if is_within_clock_tolerance {
+        // Get the head state epoch
+        let head_epoch = chain
+            .canonical_head
+            .cached_head()
+            .snapshot
+            .beacon_state
+            .current_epoch();
+
+        // Check if the head state can compute duties for this epoch (current or next epoch only)
+        let head_can_serve_request = request_epoch == head_epoch || request_epoch == head_epoch + 1;
+
+        if head_can_serve_request {
+            compute_ptc_duties_from_cached_head(request_epoch, request_indices, chain)
+        } else {
+            // Within tolerance but head is lagging
+            compute_ptc_duties_from_state(request_epoch, request_indices, chain)
+        }
     } else if request_epoch > current_epoch + 1 {
         Err(warp_utils::reject::custom_bad_request(format!(
             "request epoch {} is more than one epoch past the current epoch {}",
             request_epoch, current_epoch
         )))
     } else {
-        // request_epoch < current_epoch, in fact we only allow `request_epoch == current_epoch-1` in this case
-        compute_historic_ptc_duties(request_epoch, request_indices, chain)
+        // request_epoch < current_epoch (historic request)
+        compute_ptc_duties_from_state(request_epoch, request_indices, chain)
     }
 }
 
-fn compute_ptc_duties<T: BeaconChainTypes>(
+fn compute_ptc_duties_from_cached_head<T: BeaconChainTypes>(
     request_epoch: Epoch,
     request_indices: &[u64],
     chain: &BeaconChain<T>,
@@ -71,16 +91,138 @@ fn compute_ptc_duties<T: BeaconChainTypes>(
     )
 }
 
-/// Compute PTC duties by reading a `BeaconState` from disk, ignoring the ptc cache
-fn compute_historic_ptc_duties<T: BeaconChainTypes>(
-    _request_epoch: Epoch,
-    _request_indices: &[u64],
-    _chain: &BeaconChain<T>,
+/// Compute PTC duties by reading a `BeaconState` from disk, building the committee cache
+fn compute_ptc_duties_from_state<T: BeaconChainTypes>(
+    request_epoch: Epoch,
+    request_indices: &[u64],
+    chain: &BeaconChain<T>,
 ) -> Result<ApiDuties, warp::reject::Rejection> {
-    // TODO(EIP-7732): add support for historic PTC duties after devnet-0
-    // ideally, also after ptc cache PR has been upstreamed to sigp
-    // https://github.com/shane-moore/lighthouse/pull/10
-    todo!("Gloas historic ptc duties not implemented");
+    // If the head is quite old then it might still be relevant for a historical request.
+    //
+    // Avoid holding the `cached_head` longer than necessary.
+    let state_opt = {
+        let (cached_head, execution_status) = chain
+            .canonical_head
+            .head_and_execution_status()
+            .map_err(warp_utils::reject::unhandled_error)?;
+        let head = &cached_head.snapshot;
+
+        if head.beacon_state.current_epoch() <= request_epoch {
+            Some((
+                head.beacon_state_root(),
+                head.beacon_state.clone(),
+                execution_status.is_optimistic_or_invalid(),
+            ))
+        } else {
+            None
+        }
+    };
+
+    let (mut state, execution_optimistic) =
+        if let Some((state_root, mut state, execution_optimistic)) = state_opt {
+            // If we've loaded the head state it might be from a previous epoch, ensure it's in a
+            // suitable epoch.
+            ensure_state_knows_ptc_duties_for_epoch(
+                &mut state,
+                state_root,
+                request_epoch,
+                &chain.spec,
+            )?;
+            (state, execution_optimistic)
+        } else {
+            let (state, execution_optimistic, _finalized) =
+                StateId::from_slot(request_epoch.start_slot(T::EthSpec::slots_per_epoch()))
+                    .state(chain)?;
+            (state, execution_optimistic)
+        };
+
+    // Sanity-check the state lookup.
+    if !(state.current_epoch() == request_epoch || state.current_epoch() + 1 == request_epoch) {
+        return Err(warp_utils::reject::custom_server_error(format!(
+            "state epoch {} not suitable for request epoch {}",
+            state.current_epoch(),
+            request_epoch
+        )));
+    }
+
+    let relative_epoch =
+        RelativeEpoch::from_epoch(state.current_epoch(), request_epoch).map_err(|e| {
+            warp_utils::reject::custom_server_error(format!("invalid epoch for state: {:?}", e))
+        })?;
+
+    state
+        .build_committee_cache(relative_epoch, &chain.spec)
+        .map_err(BeaconChainError::from)
+        .map_err(warp_utils::reject::unhandled_error)?;
+
+    let dependent_root = state
+        .attester_shuffling_decision_root(chain.genesis_block_root, relative_epoch)
+        .map_err(BeaconChainError::from)
+        .map_err(warp_utils::reject::unhandled_error)?;
+
+    // Get pubkeys for all requested validators (invalid indices will be missing from the map)
+    let usize_indices = request_indices
+        .iter()
+        .map(|i| *i as usize)
+        .collect::<Vec<_>>();
+    let index_to_pubkey_map = chain
+        .validator_pubkey_bytes_many(&usize_indices)
+        .map_err(warp_utils::reject::unhandled_error)?;
+
+    // Map validator indices to duties by checking each slot in the epoch for PTC membership.
+    let duties: Vec<Option<PtcDuty>> = request_indices
+        .iter()
+        .map(
+            |&validator_index| -> Result<Option<PtcDuty>, warp::reject::Rejection> {
+                // Get pubkey; if validator doesn't exist, return None
+                let pubkey = match index_to_pubkey_map.get(&(validator_index as usize)) {
+                    Some(pk) => *pk,
+                    None => return Ok(None),
+                };
+
+                let slot_opt = state
+                    .get_ptc_assignment(validator_index as usize, request_epoch, &chain.spec)
+                    .map_err(warp_utils::reject::unhandled_error)?;
+
+                Ok(slot_opt.map(|slot| PtcDuty {
+                    validator_index,
+                    slot,
+                    pubkey,
+                }))
+            },
+        )
+        .collect::<Result<Vec<_>, _>>()?;
+
+    convert_to_api_response::<T>(duties, dependent_root, execution_optimistic)
+}
+
+fn ensure_state_knows_ptc_duties_for_epoch<E: EthSpec>(
+    state: &mut BeaconState<E>,
+    state_root: Hash256,
+    target_epoch: Epoch,
+    spec: &ChainSpec,
+) -> Result<(), warp::reject::Rejection> {
+    // Protect against an inconsistent slot clock.
+    if state.current_epoch() > target_epoch {
+        return Err(warp_utils::reject::custom_server_error(format!(
+            "state epoch {} is later than target epoch {}",
+            state.current_epoch(),
+            target_epoch
+        )));
+    } else if state.current_epoch() + 1 < target_epoch {
+        // Since there's a one-epoch look-ahead on PTC duties, it suffices to only advance to
+        // the prior epoch.
+        let target_slot = target_epoch
+            .saturating_sub(1_u64)
+            .start_slot(E::slots_per_epoch());
+
+        // A "partial" state advance is adequate since PTC duties don't rely on state roots.
+        partial_state_advance(state, Some(state_root), target_slot, spec)
+            .map_err(BeaconChainError::from)
+            .map_err(warp_utils::reject::unhandled_error)?;
+    }
+
+    Ok(())
 }
 
 /// Convert internal PTC duties to API response format

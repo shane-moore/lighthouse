@@ -1749,23 +1749,25 @@ impl<T: BeaconChainTypes> BeaconChain<T> {
         let dependent_root =
             state.attester_shuffling_decision_root(head_block_root, relative_epoch)?;
 
+        // Get pubkeys for all requested validators (invalid indices will be missing from the map)
+        let usize_indices = validator_indices
+            .iter()
+            .map(|i| *i as usize)
+            .collect::<Vec<_>>();
+        let index_to_pubkey_map = self.validator_pubkey_bytes_many(&usize_indices)?;
+
         // Map validator indices to duties by checking each slot in the epoch for PTC membership.
         let duties: Vec<Option<PtcDuty>> = validator_indices
             .iter()
             .map(|&validator_index| -> Result<Option<PtcDuty>, Error> {
-                // Find the first slot in the epoch where this validator appears in the PTC
-                let mut slot_opt = None;
-                for slot in epoch.slot_iter(T::EthSpec::slots_per_epoch()) {
-                    let ptc = state.get_ptc(slot, &self.spec)?;
-                    if ptc.0.contains(&(validator_index as usize)) {
-                        slot_opt = Some(slot);
-                        break;
-                    }
-                }
+                // Get pubkey; if validator doesn't exist, return None
+                let pubkey = match index_to_pubkey_map.get(&(validator_index as usize)) {
+                    Some(pk) => *pk,
+                    None => return Ok(None),
+                };
 
-                let pubkey = self
-                    .validator_pubkey_bytes(validator_index as usize)?
-                    .ok_or(Error::ValidatorIndexUnknown(validator_index as usize))?;
+                let slot_opt =
+                    state.get_ptc_assignment(validator_index as usize, epoch, &self.spec)?;
 
                 Ok(slot_opt.map(|slot| PtcDuty {
                     validator_index,
