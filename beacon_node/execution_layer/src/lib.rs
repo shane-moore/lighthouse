@@ -551,7 +551,7 @@ struct Inner<E: EthSpec> {
     /// Cache for deduplicating `notify_new_payload` requests.
     ///
     /// Handles both in-flight requests and recently completed requests.
-    new_payload_cache: NewPayloadCache,
+    new_payload_cache: Option<NewPayloadCache>,
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
@@ -579,6 +579,8 @@ pub struct Config {
     /// Default directory for the jwt secret if not provided through cli.
     pub default_datadir: PathBuf,
     pub execution_timeout_multiplier: Option<u32>,
+    /// Whether to bypass the new payload cache (useful for testing).
+    pub bypass_new_payload_cache: bool,
 }
 
 /// Provides access to one execution engine and provides a neat interface for consumption by the
@@ -603,6 +605,7 @@ impl<E: EthSpec> ExecutionLayer<E> {
             jwt_version,
             default_datadir,
             execution_timeout_multiplier,
+            bypass_new_payload_cache,
         } = config;
 
         let execution_url = url.ok_or(Error::NoEngine)?;
@@ -647,6 +650,12 @@ impl<E: EthSpec> ExecutionLayer<E> {
             Engine::new(api, executor.clone())
         };
 
+        let new_payload_cache = if !bypass_new_payload_cache {
+            Some(NewPayloadCache::new())
+        } else {
+            None
+        };
+
         let inner = Inner {
             engine: Arc::new(engine),
             builder: ArcSwapOption::empty(),
@@ -658,7 +667,7 @@ impl<E: EthSpec> ExecutionLayer<E> {
             executor,
             payload_cache: PayloadCache::default(),
             last_new_payload_errored: RwLock::new(false),
-            new_payload_cache: NewPayloadCache::new(),
+            new_payload_cache,
         };
 
         let el = Self {
@@ -1485,12 +1494,15 @@ impl<E: EthSpec> ExecutionLayer<E> {
     ) -> Result<PayloadStatus, Error> {
         let block_hash = new_payload_request.block_hash();
 
-        self.inner
-            .new_payload_cache
-            .get_or_execute(block_hash, || {
-                self.notify_new_payload_impl(new_payload_request)
-            })
-            .await
+        if let Some(new_payload_cache) = &self.inner.new_payload_cache {
+            new_payload_cache
+                .get_or_execute(block_hash, || {
+                    self.notify_new_payload_impl(new_payload_request)
+                })
+                .await
+        } else {
+            self.notify_new_payload_impl(new_payload_request).await
+        }
     }
 
     /// Internal implementation of notify_new_payload without deduplication logic.

@@ -469,6 +469,7 @@ where
             execution_endpoint: url,
             secret_file: None,
             suggested_fee_recipient: Some(Address::repeat_byte(42)),
+            bypass_new_payload_cache: true,
             ..Default::default()
         };
         let execution_layer =

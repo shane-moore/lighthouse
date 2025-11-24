@@ -136,6 +136,7 @@ impl<Engine: GenericExecutionEngine> TestRig<Engine> {
                 secret_file: None,
                 suggested_fee_recipient: Some(Address::repeat_byte(42)),
                 default_datadir: execution_engine.datadir(),
+                bypass_new_payload_cache: true,
                 ..Default::default()
             };
             let execution_layer = ExecutionLayer::from_config(config, executor.clone()).unwrap();
@@ -154,6 +155,7 @@ impl<Engine: GenericExecutionEngine> TestRig<Engine> {
                 secret_file: None,
                 suggested_fee_recipient: fee_recipient,
                 default_datadir: execution_engine.datadir(),
+                bypass_new_payload_cache: true,
                 ..Default::default()
             };
             let execution_layer = ExecutionLayer::from_config(config, executor).unwrap();
@@ -463,14 +465,6 @@ impl<Engine: GenericExecutionEngine> TestRig<Engine> {
 
         // TODO: again think about forks here
         let mut invalid_payload = valid_payload.clone();
-        // reverse the block hash to bypass the new payload cache
-        let reversed: [u8; 32] = {
-            let mut arr = [0; 32];
-            arr.copy_from_slice(invalid_payload.block_hash().0.as_slice());
-            arr.reverse();
-            arr
-        };
-        *invalid_payload.block_hash_mut().0 = reversed;
         *invalid_payload.prev_randao_mut() = Hash256::from_low_u64_be(42);
         let status = self
             .ee_a

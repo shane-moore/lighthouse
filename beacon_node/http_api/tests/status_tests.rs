@@ -134,9 +134,6 @@ async fn el_error_on_new_payload() {
     assert!(!api_response.is_optimistic);
     assert!(!api_response.is_syncing);
 
-    // sleep for just past the cache TTL
-    tokio::time::sleep(std::time::Duration::from_secs(12)).await;
-
     // Processing a block successfully should remove the status.
     mock_el.server.set_new_payload_status(
         block_hash,

@@ -76,6 +76,7 @@ impl<E: EthSpec> MockExecutionLayer<E> {
             execution_endpoint: Some(url),
             secret_file: Some(path),
             suggested_fee_recipient: Some(Address::repeat_byte(42)),
+            bypass_new_payload_cache: true,
             ..Default::default()
         };
         let el = ExecutionLayer::from_config(config, executor.clone()).unwrap();
