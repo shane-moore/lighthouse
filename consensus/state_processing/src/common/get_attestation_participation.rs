@@ -23,22 +23,25 @@ pub fn get_attestation_participation_flag_indices<E: EthSpec>(
     inclusion_delay: u64,
     spec: &ChainSpec,
 ) -> Result<SmallVec<[usize; NUM_FLAG_INDICES]>, Error> {
+    // Matching source
     let justified_checkpoint = if data.target.epoch == state.current_epoch() {
         state.current_justified_checkpoint()
     } else {
         state.previous_justified_checkpoint()
     };
-
-    // Matching roots.
     let is_matching_source = data.source == justified_checkpoint;
-    let is_matching_target = is_matching_source
-        && data.target.root == *state.get_block_root_at_epoch(data.target.epoch)?;
 
-    let is_matching_blockroot =
-        is_matching_target && data.beacon_block_root == *state.get_block_root(data.slot)?;
+    // Matching target
+    let target_root = *state.get_block_root_at_epoch(data.target.epoch)?;
+    let target_root_matches = data.target.root == target_root;
+    let is_matching_target = is_matching_source && target_root_matches;
+
+    // Matching head
+    let head_root = *state.get_block_root(data.slot)?;
+    let head_root_matches = data.beacon_block_root == head_root;
 
     let is_matching_head = if state.fork_name_unchecked().gloas_enabled() {
-        let is_matching_payload = if state.is_attestation_same_slot(data)? {
+        let payload_matches = if state.is_attestation_same_slot(data)? {
             // For same-slot attestations, data.index must be 0
             if data.index != 0 {
                 return Err(Error::BadOverloadedDataIndex(data.index));
@@ -56,9 +59,9 @@ pub fn get_attestation_participation_flag_indices<E: EthSpec>(
                 .get(slot_index)
                 .map_err(|_| Error::InvalidExecutionPayloadAvailabilityIndex(slot_index))?
         };
-        is_matching_blockroot && is_matching_payload
+        is_matching_target && head_root_matches && payload_matches
     } else {
-        is_matching_blockroot
+        is_matching_target && head_root_matches
     };
 
     if !is_matching_source {
