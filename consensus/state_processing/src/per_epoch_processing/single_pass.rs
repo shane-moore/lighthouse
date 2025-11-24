@@ -13,8 +13,8 @@ use std::cmp::{max, min};
 use std::collections::{BTreeSet, HashMap};
 use tracing::instrument;
 use types::{
-    ActivationQueue, BeaconState, BeaconStateError, ChainSpec, Checkpoint, DepositData, Epoch,
-    EthSpec, ExitCache, ForkName, List, ParticipationFlags, PendingDeposit,
+    ActivationQueue, BeaconState, BeaconStateError, BuilderPendingPayment, ChainSpec, Checkpoint,
+    DepositData, Epoch, EthSpec, ExitCache, ForkName, List, ParticipationFlags, PendingDeposit,
     ProgressiveBalancesCache, RelativeEpoch, Unsigned, Validator, Vector,
     consts::altair::{
         NUM_FLAG_INDICES, PARTICIPATION_FLAG_WEIGHTS, TIMELY_HEAD_FLAG_INDEX,
@@ -457,6 +457,12 @@ pub fn process_epoch_single_pass<E: EthSpec>(
         )?;
     }
 
+    // Process builder pending payments outside the single-pass loop, as they depend on balances for multiple
+    // validators and cannot be computed accurately inside the loop.
+    if fork_name.gloas_enabled() && conf.builder_pending_payments {
+        process_builder_pending_payments(state, state_ctxt, spec)?;
+    }
+
     // Finally, finish updating effective balance caches. We need this to happen *after* processing
     // of pending consolidations, which recomputes some effective balances.
     if conf.effective_balance_updates {
@@ -470,10 +476,6 @@ pub fn process_epoch_single_pass<E: EthSpec>(
 
     if conf.proposer_lookahead && fork_name.fulu_enabled() {
         process_proposer_lookahead(state, spec)?;
-    }
-
-    if conf.builder_pending_payments && fork_name.gloas_enabled() {
-        process_builder_pending_payments(state, spec)?;
     }
 
     Ok(summary)
@@ -510,16 +512,14 @@ pub fn process_proposer_lookahead<E: EthSpec>(
 }
 
 /// Calculate the quorum threshold for builder payments based on total active balance.
-pub fn get_builder_payment_quorum_threshold<E: EthSpec>(
-    state: &BeaconState<E>,
+fn get_builder_payment_quorum_threshold<E: EthSpec>(
+    state_ctxt: &StateContext,
     spec: &ChainSpec,
 ) -> Result<u64, Error> {
-    let total_active_balance = state.get_total_active_balance()?;
-
-    let quorum = total_active_balance
-        .safe_div(E::slots_per_epoch())?
-        .safe_mul(spec.builder_payment_threshold_numerator)?;
-
+    let per_slot_balance = state_ctxt
+        .total_active_balance
+        .safe_div(E::slots_per_epoch())?;
+    let quorum = per_slot_balance.safe_mul(spec.builder_payment_threshold_numerator)?;
     quorum
         .safe_div(spec.builder_payment_threshold_denominator)
         .map_err(Error::from)
@@ -528,11 +528,12 @@ pub fn get_builder_payment_quorum_threshold<E: EthSpec>(
 /// Process builder pending payments, moving qualifying payments to withdrawals.
 /// TODO(EIP-7732): Add EF consensus-spec tests for `process_builder_pending_payments`
 /// Currently blocked by EF consensus-spec-tests for Gloas not yet integrated.
-pub fn process_builder_pending_payments<E: EthSpec>(
+fn process_builder_pending_payments<E: EthSpec>(
     state: &mut BeaconState<E>,
+    state_ctxt: &StateContext,
     spec: &ChainSpec,
 ) -> Result<(), Error> {
-    let quorum = get_builder_payment_quorum_threshold(state, spec)?;
+    let quorum = get_builder_payment_quorum_threshold::<E>(state_ctxt, spec)?;
 
     // Collect qualifying payments
     let qualifying_payments = state
@@ -564,7 +565,7 @@ pub fn process_builder_pending_payments<E: EthSpec>(
         .iter()
         .skip(E::slots_per_epoch() as usize)
         .cloned()
-        .chain((0..E::slots_per_epoch() as usize).map(|_| types::BuilderPendingPayment::default()))
+        .chain((0..E::slots_per_epoch() as usize).map(|_| BuilderPendingPayment::default()))
         .collect::<Vec<_>>();
 
     *state.builder_pending_payments_mut()? = Vector::new(new_payments)?;
