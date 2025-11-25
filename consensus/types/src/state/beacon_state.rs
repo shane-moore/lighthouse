@@ -25,8 +25,8 @@ use typenum::Unsigned;
 use crate::{
     BuilderPendingPayment, BuilderPendingWithdrawal, ExecutionBlockHash, ExecutionPayloadBid,
     attestation::{
-        AttestationDuty, BeaconCommittee, Checkpoint, CommitteeIndex, PTC, ParticipationFlags,
-        PendingAttestation,
+        AttestationData, AttestationDuty, BeaconCommittee, Checkpoint, CommitteeIndex, PTC,
+        ParticipationFlags, PendingAttestation,
     },
     block::{BeaconBlock, BeaconBlockHeader, SignedBeaconBlockHash},
     consolidation::PendingConsolidation,
@@ -2058,7 +2058,7 @@ impl<E: EthSpec> BeaconState<E> {
         Ok(cache.get_attestation_duties(validator_index))
     }
 
-    /// Check if an attestation is for the same slot as the block it is attesting to.
+    /// Check if the attestation is for the block proposed at the attestation slot.
     ///
     /// Returns `true` if the attestation's block root matches the block root at the
     /// attestation's slot, and the block root differs from the previous slot's root.
@@ -2070,11 +2070,11 @@ impl<E: EthSpec> BeaconState<E> {
             return Ok(true);
         }
 
-        let is_matching_block_root = &data.beacon_block_root == self.get_block_root(data.slot)?;
-        let is_current_block_root =
-            &data.beacon_block_root != self.get_block_root(data.slot.safe_sub(1)?)?;
+        let blockroot = data.beacon_block_root;
+        let slot_blockroot = *self.get_block_root(data.slot)?;
+        let prev_blockroot = *self.get_block_root(data.slot.safe_sub(1)?)?;
 
-        Ok(is_matching_block_root && is_current_block_root)
+        Ok(blockroot == slot_blockroot && blockroot != prev_blockroot)
     }
 
     /// Compute the total active balance cache from scratch.
