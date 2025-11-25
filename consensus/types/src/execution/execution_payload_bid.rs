@@ -27,6 +27,8 @@ pub struct ExecutionPayloadBid {
     pub slot: Slot,
     #[serde(with = "serde_utils::quoted_u64")]
     pub value: u64,
+    #[serde(with = "serde_utils::quoted_u64")]
+    pub execution_payment: u64,
     pub blob_kzg_commitments_root: Hash256,
 }
 
