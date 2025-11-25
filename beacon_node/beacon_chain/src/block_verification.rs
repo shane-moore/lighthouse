@@ -334,6 +334,16 @@ pub enum BlockError {
         max_blobs_at_epoch: usize,
         block: usize,
     },
+    /// The block's execution payload bid has a `parent_block_root` that doesn't match
+    /// the block's `parent_root`.
+    ///
+    /// ## Peer scoring
+    ///
+    /// This block is invalid and the peer should be penalised.
+    BidParentBlockRootMismatch {
+        block_parent_root: Hash256,
+        bid_parent_root: Hash256,
+    },
 }
 
 /// Which specific signature(s) are invalid in a SignedBeaconBlock
@@ -1041,9 +1051,17 @@ impl<T: BeaconChainTypes> GossipVerifiedBlock<T> {
         // discussed the options on eth r&d: https://discord.com/channels/595666850260713488/874767108809031740/1420935382706425867
         // the idea is that during envelope processing, if we get back an `INVALID` status from the EL, then we add the `block_hash` to a list and if the next block's bid's `parent_block_hash` is in the list, we ignore the block.  Something like this should be implemented as part of the envelope processing flow
 
-        // TODO(EIP-7732): Discuss with Mark if he agrees that the following condition is implicitly already satisfied by the fact that an invalid parent block won't be included in fork choice and therefore will have thrown an error earlier when trying to retrieve the parent block
-        // [REJECT] The block's parent (defined by block.parent_root) passes validation.
-        // similar argument was made here for bellatrix: https://github.com/sigp/lighthouse/issues/2984#issuecomment-1048653155
+        // [REJECT] `bid.parent_block_root` == `block.parent_root`
+        // This check is only applicable post-Gloas when blocks contain execution payload bids
+        if let Ok(signed_bid) = block.message().body().signed_execution_payload_bid() {
+            let bid = &signed_bid.message;
+            if bid.parent_block_root != block.message().parent_root() {
+                return Err(BlockError::BidParentBlockRootMismatch {
+                    block_parent_root: block.message().parent_root(),
+                    bid_parent_root: bid.parent_block_root,
+                });
+            }
+        }
 
         // Beacon API block_gossip events
         if let Some(event_handler) = chain.event_handler.as_ref()
