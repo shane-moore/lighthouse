@@ -5809,7 +5809,7 @@ impl<T: BeaconChainTypes> BeaconChain<T> {
                     execution_payload_value,
                 )
             }
-            BeaconState::Gloas(_) => todo!("Gloas block production"),
+            BeaconState::Gloas(_) => return Err(BlockProductionError::GloasNotImplemented),
         };
 
         let block = SignedBeaconBlock::from_block(
