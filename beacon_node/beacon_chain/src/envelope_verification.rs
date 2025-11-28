@@ -216,9 +216,9 @@ impl<T: BeaconChainTypes> GossipVerifiedEnvelope<T> {
         signed_envelope: Arc<SignedExecutionPayloadEnvelope<T::EthSpec>>,
         chain: &BeaconChain<T>,
     ) -> Result<Self, EnvelopeError> {
-        let envelope = signed_envelope.message();
-        let payload = envelope.payload();
-        let beacon_block_root = envelope.beacon_block_root();
+        let envelope = &signed_envelope.message;
+        let payload = &envelope.payload;
+        let beacon_block_root = envelope.beacon_block_root;
 
         // check that we've seen the parent block of this envelope and that it passes validation
         // TODO(EIP-7732): this check would fail if the block didn't pass validation right?
@@ -255,26 +255,26 @@ impl<T: BeaconChainTypes> GossipVerifiedEnvelope<T> {
         // should these kinds of checks be included for envelopes as well?
 
         // check that the slot of the envelope matches the slot of the parent block
-        if envelope.slot() != parent_block.slot() {
+        if envelope.slot != parent_block.slot() {
             return Err(EnvelopeError::SlotMismatch {
                 parent_block: parent_block.slot(),
-                envelope: envelope.slot(),
+                envelope: envelope.slot,
             });
         }
 
         // builder index matches committed bid
-        if envelope.builder_index() != execution_bid.builder_index {
+        if envelope.builder_index != execution_bid.builder_index {
             return Err(EnvelopeError::BuilderIndexMismatch {
                 committed_bid: execution_bid.builder_index,
-                envelope: envelope.builder_index(),
+                envelope: envelope.builder_index,
             });
         }
 
         // the block hash should match the block hash of the execution bid
-        if payload.block_hash() != execution_bid.block_hash {
+        if payload.block_hash != execution_bid.block_hash {
             return Err(EnvelopeError::BlockHashMismatch {
                 committed_bid: execution_bid.block_hash,
-                envelope: payload.block_hash(),
+                envelope: payload.block_hash,
             });
         }
 
@@ -283,7 +283,7 @@ impl<T: BeaconChainTypes> GossipVerifiedEnvelope<T> {
         //                 and so on.
 
         // get the fork from the cache so we can verify the signature
-        let block_slot = envelope.slot();
+        let block_slot = envelope.slot;
         let block_epoch = block_slot.epoch(T::EthSpec::slots_per_epoch());
         let proposer_shuffling_decision_block =
             parent_proto_block.proposer_shuffling_root_for_child_block(block_epoch, &chain.spec);
@@ -311,9 +311,9 @@ impl<T: BeaconChainTypes> GossipVerifiedEnvelope<T> {
         let signature_is_valid = {
             let pubkey_cache = chain.validator_pubkey_cache.read();
             let builder_pubkey = pubkey_cache
-                .get(envelope.builder_index() as usize)
+                .get(envelope.builder_index as usize)
                 .ok_or_else(|| EnvelopeError::UnknownValidator {
-                    builder_index: envelope.builder_index(),
+                    builder_index: envelope.builder_index,
                 })?;
             signed_envelope.verify_signature(
                 builder_pubkey,
@@ -360,13 +360,13 @@ impl<T: BeaconChainTypes> IntoExecutionPendingEnvelope<T> for GossipVerifiedEnve
         notify_execution_layer: NotifyExecutionLayer,
     ) -> Result<ExecutionPendingEnvelope<T>, EnvelopeError> {
         let signed_envelope = self.signed_envelope;
-        let envelope = signed_envelope.message();
-        let payload = &envelope.payload();
+        let envelope = &signed_envelope.message;
+        let payload = &envelope.payload;
 
         // Verify the execution payload is valid
         let payload_notifier =
             PayloadNotifier::from_envelope(chain.clone(), envelope, notify_execution_layer)?;
-        let block_root = envelope.beacon_block_root();
+        let block_root = envelope.beacon_block_root;
         let slot = self.parent_block.slot();
 
         let payload_verification_future = async move {
@@ -417,7 +417,7 @@ impl<T: BeaconChainTypes> IntoExecutionPendingEnvelope<T> for GossipVerifiedEnve
 
         Ok(ExecutionPendingEnvelope {
             signed_envelope: MaybeAvailableEnvelope::AvailabilityPending {
-                block_hash: payload.block_hash(),
+                block_hash: payload.block_hash,
                 envelope: signed_envelope,
             },
             import_data: EnvelopeImportData {

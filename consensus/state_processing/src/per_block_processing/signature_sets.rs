@@ -378,13 +378,13 @@ where
         &state.fork(),
         state.genesis_validators_root(),
     );
-    let message = signed_envelope.message().signing_root(domain);
-    let pubkey = get_pubkey(signed_envelope.message().builder_index() as usize).ok_or(
-        Error::ValidatorUnknown(signed_envelope.message().builder_index()),
+    let message = signed_envelope.message.signing_root(domain);
+    let pubkey = get_pubkey(signed_envelope.message.builder_index as usize).ok_or(
+        Error::ValidatorUnknown(signed_envelope.message.builder_index),
     )?;
 
     Ok(SignatureSet::single_pubkey(
-        signed_envelope.signature(),
+        &signed_envelope.signature,
         pubkey,
         message,
     ))

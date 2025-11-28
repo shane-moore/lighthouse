@@ -110,7 +110,7 @@ impl<T: BeaconChainTypes> PayloadNotifier<T> {
 
     pub fn from_envelope(
         _chain: Arc<BeaconChain<T>>,
-        _envelope: ExecutionPayloadEnvelopeRef<T::EthSpec>,
+        _envelope: &ExecutionPayloadEnvelope<T::EthSpec>,
         _notify_execution_layer: NotifyExecutionLayer,
     ) -> Result<Self, EnvelopeError> {
         todo!(

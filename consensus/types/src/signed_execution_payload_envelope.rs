@@ -1,82 +1,22 @@
 use crate::test_utils::TestRandom;
 use crate::*;
 use educe::Educe;
-use serde::de::{Deserializer, Error as _};
 use serde::{Deserialize, Serialize};
 use ssz_derive::{Decode, Encode};
-use superstruct::superstruct;
 use test_random_derive::TestRandom;
 use tree_hash_derive::TreeHash;
 
-#[superstruct(
-    variants(Gloas, NextFork),
-    variant_attributes(
-        derive(
-            Debug,
-            Clone,
-            Serialize,
-            Deserialize,
-            Encode,
-            Decode,
-            TreeHash,
-            TestRandom,
-            Educe
-        ),
-        cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary)),
-        educe(PartialEq, Hash(bound(E: EthSpec))),
-        serde(bound = "E: EthSpec", deny_unknown_fields),
-        cfg_attr(feature = "arbitrary", arbitrary(bound = "E: EthSpec"))
-    ),
-    ref_attributes(
-        derive(Debug, PartialEq, TreeHash),
-        tree_hash(enum_behaviour = "transparent")
-    ),
-    cast_error(ty = "Error", expr = "BeaconStateError::IncorrectStateVariant"),
-    partial_getter_error(ty = "Error", expr = "BeaconStateError::IncorrectStateVariant")
-)]
-#[derive(Debug, Clone, Serialize, Encode, Deserialize, TreeHash, Educe)]
+#[derive(Debug, Clone, Serialize, Encode, Decode, Deserialize, TestRandom, TreeHash, Educe)]
 #[educe(PartialEq, Hash(bound(E: EthSpec)))]
-#[serde(bound = "E: EthSpec", untagged)]
-#[ssz(enum_behaviour = "transparent")]
-#[tree_hash(enum_behaviour = "transparent")]
+#[serde(bound = "E: EthSpec")]
 pub struct SignedExecutionPayloadEnvelope<E: EthSpec> {
-    #[superstruct(only(Gloas), partial_getter(rename = "message_gloas"))]
-    pub message: ExecutionPayloadEnvelopeGloas<E>,
-    #[superstruct(only(NextFork), partial_getter(rename = "message_next_fork"))]
-    pub message: crate::execution_payload_envelope::ExecutionPayloadEnvelopeNextFork<E>,
+    pub message: ExecutionPayloadEnvelope<E>,
     pub signature: Signature,
 }
 
 impl<E: EthSpec> SignedExecutionPayloadEnvelope<E> {
-    /// Create a new `SignedExecutionPayloadEnvelope` from an `ExecutionPayloadEnvelope` and `Signature`.
-    pub fn from_envelope(envelope: ExecutionPayloadEnvelope<E>, signature: Signature) -> Self {
-        match envelope {
-            ExecutionPayloadEnvelope::Gloas(message) => SignedExecutionPayloadEnvelope::Gloas(
-                signed_execution_payload_envelope::SignedExecutionPayloadEnvelopeGloas {
-                    message,
-                    signature,
-                },
-            ),
-            ExecutionPayloadEnvelope::NextFork(message) => {
-                SignedExecutionPayloadEnvelope::NextFork(
-                    signed_execution_payload_envelope::SignedExecutionPayloadEnvelopeNextFork {
-                        message,
-                        signature,
-                    },
-                )
-            }
-        }
-    }
-
-    pub fn message(&self) -> ExecutionPayloadEnvelopeRef<'_, E> {
-        match self {
-            Self::Gloas(signed) => ExecutionPayloadEnvelopeRef::Gloas(&signed.message),
-            Self::NextFork(signed) => ExecutionPayloadEnvelopeRef::NextFork(&signed.message),
-        }
-    }
-
     pub fn slot(&self) -> Slot {
-        self.message().slot()
+        self.message.slot
     }
 
     pub fn epoch(&self) -> Epoch {
@@ -84,11 +24,11 @@ impl<E: EthSpec> SignedExecutionPayloadEnvelope<E> {
     }
 
     pub fn beacon_block_root(&self) -> Hash256 {
-        self.message().beacon_block_root()
+        self.message.beacon_block_root
     }
 
     pub fn block_hash(&self) -> ExecutionBlockHash {
-        self.message().block_hash()
+        self.message.payload.block_hash
     }
 
     /// Verify `self.signature`.
@@ -109,17 +49,17 @@ impl<E: EthSpec> SignedExecutionPayloadEnvelope<E> {
         );
         let pubkey = parent_state
             .validators()
-            .get(self.message().builder_index() as usize)
+            .get(self.message.builder_index as usize)
             .and_then(|v| {
                 let pk: Option<PublicKey> = v.pubkey.decompress().ok();
                 pk
             })
             .ok_or_else(|| {
-                BeaconStateError::UnknownValidator(self.message().builder_index() as usize)
+                BeaconStateError::UnknownValidator(self.message.builder_index as usize)
             })?;
-        let message = self.message().signing_root(domain);
+        let message = self.message.signing_root(domain);
 
-        Ok(self.signature().verify(&pubkey, message))
+        Ok(self.signature.verify(&pubkey, message))
     }
 
     /// Verify `self.signature`.
@@ -140,25 +80,9 @@ impl<E: EthSpec> SignedExecutionPayloadEnvelope<E> {
             genesis_validators_root,
         );
 
-        let message = self.message().signing_root(domain);
+        let message = self.message.signing_root(domain);
 
-        self.signature().verify(pubkey, message)
-    }
-}
-
-impl<'de, E: EthSpec> ContextDeserialize<'de, ForkName> for SignedExecutionPayloadEnvelope<E> {
-    fn context_deserialize<D>(deserializer: D, context: ForkName) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let value: Self = Deserialize::deserialize(deserializer)?;
-
-        match (context, &value) {
-            (ForkName::Gloas, Self::Gloas { .. }) => Ok(value),
-            _ => Err(D::Error::custom(format!(
-                "SignedExecutionPayloadEnvelope does not support fork {context:?}"
-            ))),
-        }
+        self.signature.verify(pubkey, message)
     }
 }
 
@@ -167,13 +91,5 @@ mod tests {
     use super::*;
     use crate::MainnetEthSpec;
 
-    mod gloas {
-        use super::*;
-        ssz_and_tree_hash_tests!(SignedExecutionPayloadEnvelopeGloas<MainnetEthSpec>);
-    }
-
-    mod next_fork {
-        use super::*;
-        ssz_and_tree_hash_tests!(SignedExecutionPayloadEnvelopeNextFork<MainnetEthSpec>);
-    }
+    ssz_and_tree_hash_tests!(SignedExecutionPayloadEnvelope<MainnetEthSpec>);
 }

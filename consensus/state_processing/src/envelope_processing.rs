@@ -124,9 +124,9 @@ pub fn envelope_processing<E: EthSpec>(
         }
     }
 
-    let envelope = signed_envelope.message();
-    let payload = envelope.payload();
-    let execution_requests = envelope.execution_requests();
+    let envelope = &signed_envelope.message;
+    let payload = &envelope.payload;
+    let execution_requests = &envelope.execution_requests;
 
     // Cache latest block header state root
     if state.latest_block_header().state_root == Hash256::default() {
@@ -138,16 +138,16 @@ pub fn envelope_processing<E: EthSpec>(
 
     // Verify consistency with the beacon block
     envelope_verify!(
-        envelope.beacon_block_root() == state.latest_block_header().tree_hash_root(),
+        envelope.beacon_block_root == state.latest_block_header().tree_hash_root(),
         EnvelopeProcessingError::LatestBlockHeaderMismatch {
-            envelope_root: envelope.beacon_block_root(),
+            envelope_root: envelope.beacon_block_root,
             block_header_root: state.latest_block_header().tree_hash_root(),
         }
     );
     envelope_verify!(
-        envelope.slot() == state.slot(),
+        envelope.slot == state.slot(),
         EnvelopeProcessingError::SlotMismatch {
-            envelope_slot: envelope.slot(),
+            envelope_slot: envelope.slot,
             parent_state_slot: state.slot(),
         }
     );
@@ -155,75 +155,75 @@ pub fn envelope_processing<E: EthSpec>(
     // Verify consistency with the committed bid
     let committed_bid = state.latest_execution_payload_bid()?;
     // builder index match already verified
-    if committed_bid.blob_kzg_commitments_root != envelope.blob_kzg_commitments().tree_hash_root() {
+    if committed_bid.blob_kzg_commitments_root != envelope.blob_kzg_commitments.tree_hash_root() {
         return Err(EnvelopeProcessingError::BlobKzgCommitmentsRootMismatch {
             committed_bid: committed_bid.blob_kzg_commitments_root,
-            envelope: envelope.blob_kzg_commitments().tree_hash_root(),
+            envelope: envelope.blob_kzg_commitments.tree_hash_root(),
         });
     };
 
     // Verify the withdrawals root
     envelope_verify!(
-        payload.withdrawals()?.tree_hash_root() == *state.latest_withdrawals_root()?,
+        payload.withdrawals.tree_hash_root() == *state.latest_withdrawals_root()?,
         EnvelopeProcessingError::WithdrawalsRootMismatch {
             state: *state.latest_withdrawals_root()?,
-            envelope: payload.withdrawals()?.tree_hash_root(),
+            envelope: payload.withdrawals.tree_hash_root(),
         }
     );
 
     // Verify the gas limit
     envelope_verify!(
-        payload.gas_limit() == committed_bid.gas_limit,
+        payload.gas_limit == committed_bid.gas_limit,
         EnvelopeProcessingError::GasLimitMismatch {
             committed_bid: committed_bid.gas_limit,
-            envelope: payload.gas_limit(),
+            envelope: payload.gas_limit,
         }
     );
 
     // Verify the block hash
     envelope_verify!(
-        committed_bid.block_hash == payload.block_hash(),
+        committed_bid.block_hash == payload.block_hash,
         EnvelopeProcessingError::BlockHashMismatch {
             committed_bid: committed_bid.block_hash,
-            envelope: payload.block_hash(),
+            envelope: payload.block_hash,
         }
     );
 
     // Verify consistency of the parent hash with respect to the previous execution payload
     envelope_verify!(
-        payload.parent_hash() == *state.latest_block_hash()?,
+        payload.parent_hash == *state.latest_block_hash()?,
         EnvelopeProcessingError::ParentHashMismatch {
             state: *state.latest_block_hash()?,
-            envelope: payload.parent_hash(),
+            envelope: payload.parent_hash,
         }
     );
 
     // Verify prev_randao
     envelope_verify!(
-        payload.prev_randao() == *state.get_randao_mix(state.current_epoch())?,
+        payload.prev_randao == *state.get_randao_mix(state.current_epoch())?,
         EnvelopeProcessingError::PrevRandaoMismatch {
             state: *state.get_randao_mix(state.current_epoch())?,
-            envelope: payload.prev_randao(),
+            envelope: payload.prev_randao,
         }
     );
 
     // Verify the timestamp
     let state_timestamp = compute_timestamp_at_slot(state, state.slot(), spec)?;
     envelope_verify!(
-        payload.timestamp() == state_timestamp,
+        payload.timestamp == state_timestamp,
         EnvelopeProcessingError::TimestampMismatch {
             state: state_timestamp,
-            envelope: payload.timestamp(),
+            envelope: payload.timestamp,
         }
     );
 
     // Verify the commitments are under limit
     let max_blobs = spec.max_blobs_per_block(state.current_epoch()) as usize;
     envelope_verify!(
-        envelope.blob_kzg_commitments().len() <= max_blobs,
+        envelope.blob_kzg_commitments.len() <= max_blobs,
         EnvelopeProcessingError::BlobLimitExceeded {
             max: max_blobs,
-            envelope: envelope.blob_kzg_commitments().len(),
+            envelope: envelope.blob_kzg_commitments.len(),
         }
     );
 
@@ -269,14 +269,14 @@ pub fn envelope_processing<E: EthSpec>(
         .execution_payload_availability_mut()?
         .set(availability_index, true)
         .map_err(EnvelopeProcessingError::BitFieldError)?;
-    *state.latest_block_hash_mut()? = payload.block_hash();
+    *state.latest_block_hash_mut()? = payload.block_hash;
 
     // verify the state root
     envelope_verify!(
-        envelope.state_root() == state.canonical_root()?,
+        envelope.state_root == state.canonical_root()?,
         EnvelopeProcessingError::InvalidStateRoot {
             state: state.canonical_root()?,
-            envelope: envelope.state_root(),
+            envelope: envelope.state_root,
         }
     );
 
