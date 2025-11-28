@@ -186,10 +186,7 @@ pub use crate::execution_payload::{
     Transaction, Transactions, Withdrawals,
 };
 pub use crate::execution_payload_bid::ExecutionPayloadBid;
-pub use crate::execution_payload_envelope::{
-    ExecutionPayloadEnvelope, ExecutionPayloadEnvelopeGloas, ExecutionPayloadEnvelopeNextFork,
-    ExecutionPayloadEnvelopeRef,
-};
+pub use crate::execution_payload_envelope::ExecutionPayloadEnvelope;
 pub use crate::execution_payload_header::{
     ExecutionPayloadHeader, ExecutionPayloadHeaderBellatrix, ExecutionPayloadHeaderCapella,
     ExecutionPayloadHeaderDeneb, ExecutionPayloadHeaderElectra, ExecutionPayloadHeaderFulu,

@@ -172,7 +172,7 @@ impl<'block, E: EthSpec> NewPayloadRequest<'block, E> {
     }
 }
 
-//TODO(EIP7732): Consider implmenting these as methods on the NewPayloadRequest struct
+//TODO(EIP7732): Consider implementing these as methods on the NewPayloadRequest struct
 impl<'a, E: EthSpec> TryFrom<BeaconBlockRef<'a, E>> for NewPayloadRequest<'a, E> {
     type Error = BeaconStateError;
 
