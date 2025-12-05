@@ -1,8 +1,10 @@
 use crate::attestation::payload_attestation_data::PayloadAttestationData;
 use crate::test_utils::TestRandom;
-use crate::*;
+use crate::{EthSpec, ForkName, context_deserialize};
+use bls::AggregateSignature;
 use educe::Educe;
 use serde::{Deserialize, Serialize};
+use ssz::BitList;
 use ssz_derive::{Decode, Encode};
 use test_random_derive::TestRandom;
 use tree_hash_derive::TreeHash;
