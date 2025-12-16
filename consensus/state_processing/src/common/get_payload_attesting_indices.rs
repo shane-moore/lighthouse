@@ -1,6 +1,8 @@
 use crate::per_block_processing::errors::{
     BlockOperationError, PayloadAttestationInvalid as Invalid,
 };
+use ssz_types::VariableList;
+use typenum::Unsigned;
 use types::*;
 
 pub fn get_indexed_payload_attestation<E: EthSpec>(
