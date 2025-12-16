@@ -1,8 +1,10 @@
 use bls::Hash256;
+use milhouse::{List, Vector};
+use ssz_types::BitVector;
 use std::mem;
 use types::{
-    BeaconState, BeaconStateError as Error, BeaconStateGloas, BitVector, BuilderPendingPayment,
-    ChainSpec, EthSpec, ExecutionPayloadBid, Fork, List, Vector,
+    BeaconState, BeaconStateError as Error, BeaconStateGloas, BuilderPendingPayment, ChainSpec,
+    EthSpec, ExecutionPayloadBid, Fork,
 };
 
 /// Transform a `Fulu` state into a `Gloas` state.

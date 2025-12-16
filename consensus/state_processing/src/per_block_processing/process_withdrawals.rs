@@ -1,11 +1,12 @@
 use super::errors::BlockProcessingError;
 use super::get_expected_withdrawals;
 use crate::common::decrease_balance;
+use milhouse::List;
 use safe_arith::SafeArith;
 use tree_hash::TreeHash;
 use types::{
     AbstractExecPayload, BeaconState, BuilderPendingWithdrawal, ChainSpec, EthSpec, ExecPayload,
-    List, Withdrawals,
+    Withdrawals,
 };
 
 /// Check if a builder payment is withdrawable.

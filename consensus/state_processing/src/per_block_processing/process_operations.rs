@@ -6,8 +6,9 @@ use crate::common::{
 };
 use crate::per_block_processing::errors::{BlockProcessingError, IntoWithIndex};
 use crate::per_block_processing::verify_payload_attestation::verify_payload_attestation;
+use ssz_types::FixedVector;
+use typenum::U33;
 use types::consts::altair::{PARTICIPATION_FLAG_WEIGHTS, PROPOSER_WEIGHT, WEIGHT_DENOMINATOR};
-use types::typenum::U33;
 
 pub fn process_operations<E: EthSpec, Payload: AbstractExecPayload<E>>(
     state: &mut BeaconState<E>,
