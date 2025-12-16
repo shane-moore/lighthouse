@@ -58,7 +58,9 @@ impl<E: EthSpec> SignedExecutionPayloadEnvelope<E> {
                 let pk: Option<PublicKey> = v.pubkey.decompress().ok();
                 pk
             })
-            .ok_or(BeaconStateError::UnknownValidator(self.message.builder_index as usize))?;
+            .ok_or(BeaconStateError::UnknownValidator(
+                self.message.builder_index as usize,
+            ))?;
         let message = self.message.signing_root(domain);
 
         Ok(self.signature.verify(&pubkey, message))
