@@ -1,6 +1,6 @@
-use crate::execution::execution_payload_envelope::ExecutionPayloadEnvelope;
 use crate::test_utils::TestRandom;
-use crate::*;
+use crate::{EthSpec, ExecutionPayloadEnvelope};
+use bls::Signature;
 use educe::Educe;
 use serde::{Deserialize, Serialize};
 use ssz_derive::{Decode, Encode};

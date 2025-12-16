@@ -1,6 +1,7 @@
-use crate::execution::execution_payload_bid::ExecutionPayloadBid;
 use crate::test_utils::TestRandom;
-use crate::*;
+use crate::{ExecutionPayloadBid, ForkName};
+use bls::Signature;
+use context_deserialize::context_deserialize;
 use educe::Educe;
 use serde::{Deserialize, Serialize};
 use ssz_derive::{Decode, Encode};

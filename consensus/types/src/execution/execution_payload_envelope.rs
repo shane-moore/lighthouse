@@ -1,8 +1,9 @@
 use crate::test_utils::TestRandom;
 use crate::{
     EthSpec, ExecutionPayloadGloas, ExecutionRequests, ForkName, Hash256, KzgCommitments,
-    SignedRoot, Slot, context_deserialize,
+    SignedRoot, Slot,
 };
+use context_deserialize::context_deserialize;
 use educe::Educe;
 use serde::{Deserialize, Serialize};
 use ssz_derive::{Decode, Encode};

@@ -1,7 +1,8 @@
+use crate::ForkName;
 use crate::attestation::payload_attestation_data::PayloadAttestationData;
 use crate::test_utils::TestRandom;
-use crate::{ForkName, context_deserialize};
 use bls::Signature;
+use context_deserialize::context_deserialize;
 use serde::{Deserialize, Serialize};
 use ssz_derive::{Decode, Encode};
 use test_random_derive::TestRandom;

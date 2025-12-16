@@ -1,7 +1,8 @@
 use crate::attestation::payload_attestation_data::PayloadAttestationData;
 use crate::test_utils::TestRandom;
-use crate::{EthSpec, ForkName, context_deserialize};
+use crate::{EthSpec, ForkName};
 use bls::AggregateSignature;
+use context_deserialize::context_deserialize;
 use educe::Educe;
 use serde::{Deserialize, Serialize};
 use ssz::BitList;

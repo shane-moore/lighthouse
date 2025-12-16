@@ -1,7 +1,6 @@
 use crate::test_utils::TestRandom;
-use crate::{
-    Address, ExecutionBlockHash, ForkName, Hash256, SignedRoot, Slot, context_deserialize,
-};
+use crate::{Address, ExecutionBlockHash, ForkName, Hash256, SignedRoot, Slot};
+use context_deserialize::context_deserialize;
 use educe::Educe;
 use serde::{Deserialize, Serialize};
 use ssz_derive::{Decode, Encode};
