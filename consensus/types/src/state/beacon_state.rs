@@ -3243,7 +3243,7 @@ impl<E: EthSpec> BeaconState<E> {
         validator_index: usize,
         epoch: Epoch,
         spec: &ChainSpec,
-    ) -> Result<Option<Slot>, Error> {
+    ) -> Result<Option<Slot>, BeaconStateError> {
         for slot in epoch.slot_iter(E::slots_per_epoch()) {
             let ptc = self.get_ptc(slot, spec)?;
             if ptc.0.contains(&validator_index) {

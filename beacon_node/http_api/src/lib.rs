@@ -2563,6 +2563,7 @@ pub fn serve<T: BeaconChainTypes>(
 
     // POST validator/duties/ptc/{epoch}
     let post_validator_duties_ptc = eth_v1
+        .clone()
         .and(warp::path("validator"))
         .and(warp::path("duties"))
         .and(warp::path("ptc"))

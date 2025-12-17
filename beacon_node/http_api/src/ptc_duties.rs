@@ -2,10 +2,10 @@
 
 use crate::state_id::StateId;
 use beacon_chain::{BeaconChain, BeaconChainError, BeaconChainTypes};
-use eth2::types::{self as api_types};
+use eth2::types::{self as api_types, PtcDuty};
 use slot_clock::SlotClock;
 use state_processing::state_advance::partial_state_advance;
-use types::{BeaconState, ChainSpec, Epoch, EthSpec, Hash256, PtcDuty, RelativeEpoch};
+use types::{BeaconState, ChainSpec, Epoch, EthSpec, Hash256, RelativeEpoch};
 
 /// The struct that is returned to the requesting HTTP client.
 type ApiDuties = api_types::DutiesResponse<Vec<PtcDuty>>;
