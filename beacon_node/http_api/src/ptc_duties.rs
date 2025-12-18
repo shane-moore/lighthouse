@@ -84,7 +84,7 @@ fn compute_ptc_duties_from_cached_head<T: BeaconChainTypes>(
         .validator_ptc_duties(request_indices, request_epoch)
         .map_err(warp_utils::reject::unhandled_error)?;
 
-    convert_to_api_response::<T>(
+    convert_to_api_response(
         duties,
         dependent_root,
         execution_status.is_optimistic_or_invalid(),
@@ -193,7 +193,7 @@ fn compute_ptc_duties_from_state<T: BeaconChainTypes>(
         )
         .collect::<Result<Vec<_>, _>>()?;
 
-    convert_to_api_response::<T>(duties, dependent_root, execution_optimistic)
+    convert_to_api_response(duties, dependent_root, execution_optimistic)
 }
 
 fn ensure_state_knows_ptc_duties_for_epoch<E: EthSpec>(
@@ -226,7 +226,7 @@ fn ensure_state_knows_ptc_duties_for_epoch<E: EthSpec>(
 }
 
 /// Convert internal PTC duties to API response format
-fn convert_to_api_response<T: BeaconChainTypes>(
+fn convert_to_api_response(
     duties: Vec<Option<PtcDuty>>,
     dependent_root: Hash256,
     execution_optimistic: bool,

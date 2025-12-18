@@ -1714,6 +1714,7 @@ impl<T: BeaconChainTypes> BeaconChain<T> {
     /// MVP implementation that:
     /// 1. Takes atomic snapshot of canonical head
     /// 2. Uses committee caches already built for the epoch
+    ///
     /// Supports current and next epoch only (API enforces this constraint).
     /// Re-org resistant: All computations use consistent cloned state.
     ///

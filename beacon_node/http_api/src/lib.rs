@@ -2562,33 +2562,12 @@ pub fn serve<T: BeaconChainTypes>(
     );
 
     // POST validator/duties/ptc/{epoch}
-    let post_validator_duties_ptc = eth_v1
-        .clone()
-        .and(warp::path("validator"))
-        .and(warp::path("duties"))
-        .and(warp::path("ptc"))
-        .and(warp::path::param::<Epoch>().or_else(|_| async {
-            Err(warp_utils::reject::custom_bad_request(
-                "Invalid epoch".to_string(),
-            ))
-        }))
-        .and(warp::path::end())
-        .and(not_while_syncing_filter.clone())
-        .and(warp_utils::json::json())
-        .and(task_spawner_filter.clone())
-        .and(chain_filter.clone())
-        .then(
-            |epoch: Epoch,
-             not_synced_filter: Result<(), Rejection>,
-             indices: api_types::ValidatorIndexData,
-             task_spawner: TaskSpawner<T::EthSpec>,
-             chain: Arc<BeaconChain<T>>| {
-                task_spawner.blocking_json_task(Priority::P0, move || {
-                    not_synced_filter?;
-                    ptc_duties::ptc_duties(epoch, &indices.0, &chain)
-                })
-            },
-        );
+    let post_validator_duties_ptc = post_validator_duties_ptc(
+        eth_v1.clone().clone(),
+        chain_filter.clone(),
+        not_while_syncing_filter.clone(),
+        task_spawner_filter.clone(),
+    );
 
     // POST validator/duties/sync/{epoch}
     let post_validator_duties_sync = post_validator_duties_sync(
