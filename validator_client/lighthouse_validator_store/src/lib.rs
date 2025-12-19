@@ -756,7 +756,7 @@ impl<T: SlotClock + 'static, E: EthSpec> ValidatorStore for LighthouseValidatorS
         let beacon_block = block.clone();
         self.sign_abstract_block(validator_pubkey, beacon_block, current_slot)
             .await
-            .map(|signed_block| Arc::new(signed_block))
+            .map(Arc::new)
     }
 
     async fn sign_execution_payload_envelope(

@@ -346,11 +346,11 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> BlockService<S, T> {
                 async move {
                     let result = if service.chain_spec.fork_name_at_epoch(current_epoch).gloas_enabled() {
                         service
-                            .publish_block_gloas(slot, validator_pubkey, builder_boost_factor)
+                            .get_validator_block_and_publish_block_gloas(slot, validator_pubkey, builder_boost_factor)
                             .await
                     } else {
                         service
-                            .publish_block(slot, validator_pubkey, builder_boost_factor)
+                            .get_validator_block_and_publish_block(slot, validator_pubkey, builder_boost_factor)
                             .await
                     };
 
@@ -445,6 +445,7 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> BlockService<S, T> {
     }
 
     #[allow(clippy::too_many_arguments)]
+    #[instrument(skip_all, fields(%slot, ?validator_pubkey))]
     async fn sign_and_publish_block_gloas(
         &self,
         proposer_fallback: ProposerFallback<T>,
@@ -458,6 +459,7 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> BlockService<S, T> {
         let res = self
             .validator_store
             .sign_block_gloas(*validator_pubkey, unsigned_block, slot)
+            .instrument(info_span!("sign_block"))
             .await;
 
         let signed_block = match res {
@@ -515,7 +517,12 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> BlockService<S, T> {
 
     // TODO(EIP-7732): Remove this sometime after gloas is live and make publish_block_gloas the default
     // TODO(EIP-7732): Seems like block production testing is done through `simulator`. Discuss with team if that is sufficient for all this new gloas code.
-    async fn publish_block(
+    #[instrument(
+        name = "block_proposal_duty_cycle",
+        skip_all,
+        fields(%slot, ?validator_pubkey)
+    )]
+    async fn get_validator_block_and_publish_block(
         self,
         slot: Slot,
         validator_pubkey: PublicKeyBytes,
@@ -658,7 +665,12 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> BlockService<S, T> {
         Ok(())
     }
 
-    async fn publish_block_gloas(
+    #[instrument(
+        name = "block_proposal_duty_cycle",
+        skip_all,
+        fields(%slot, ?validator_pubkey)
+    )]
+    async fn get_validator_block_and_publish_block_gloas(
         self,
         slot: Slot,
         validator_pubkey: PublicKeyBytes,
@@ -799,21 +811,16 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> BlockService<S, T> {
         if let (Ok(bid), Some(validator_idx)) = (
             unsigned_block.body().signed_execution_payload_bid(),
             self_ref.validator_store.validator_index(&validator_pubkey),
-        ) {
-            if bid.message.builder_index == validator_idx {
-                info!(
-                    validator_index = validator_idx,
-                    builder_index = bid.message.builder_index,
-                    "Proposer is also the builder, will publish execution payload envelope after block"
-                );
-                self_ref
-                    .publish_execution_payload_envelope(
-                        slot,
-                        validator_pubkey,
-                        Some(block_source_node),
-                    )
-                    .await?;
-            }
+        ) && bid.message.builder_index == validator_idx
+        {
+            info!(
+                validator_index = validator_idx,
+                builder_index = bid.message.builder_index,
+                "Proposer is also the builder, will publish execution payload envelope after block"
+            );
+            self_ref
+                .publish_execution_payload_envelope(slot, validator_pubkey, Some(block_source_node))
+                .await?;
         }
 
         Ok(())
@@ -855,6 +862,7 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> BlockService<S, T> {
         Ok::<_, BlockError>(())
     }
 
+    #[instrument(skip_all)]
     async fn publish_signed_block_contents_gloas(
         &self,
         signed_block: &Arc<SignedBeaconBlock<S::E>>,
@@ -962,14 +970,11 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> BlockService<S, T> {
             &[validator_metrics::EXECUTION_PAYLOAD_ENVELOPE_HTTP_GET],
         );
 
-        let builder_index = match self.validator_store.validator_index(validator_pubkey) {
-            Some(index) => index,
-            None => {
-                return Err(BlockError::Irrecoverable(format!(
-                    "Cannot find validator index {} for execution payload envelope",
-                    validator_pubkey
-                )));
-            }
+        let Some(builder_index) = self.validator_store.validator_index(validator_pubkey) else {
+            return Err(BlockError::Irrecoverable(format!(
+                "Cannot find validator index {} for execution payload envelope",
+                validator_pubkey
+            )));
         };
 
         // CRITICAL: We MUST use the same beacon node that provided the block.

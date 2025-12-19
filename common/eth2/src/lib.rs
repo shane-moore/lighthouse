@@ -2217,6 +2217,7 @@ impl BeaconNodeHttpClient {
     }
 
     /// returns `GET v3/validator/blocks/{slot}` or `GET v4/validator/blocks/{slot}` URL path
+    #[allow(clippy::too_many_arguments)]
     pub async fn get_validator_blocks_v3_and_v4_path(
         &self,
         version: EndpointVersion,
