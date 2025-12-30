@@ -248,6 +248,65 @@ pub fn get_validator_attestation_data<T: BeaconChainTypes>(
         .boxed()
 }
 
+// GET validator/payload_attestation_data/{slot}
+pub fn get_validator_payload_attestation_data<T: BeaconChainTypes>(
+    eth_v1: EthV1Filter,
+    chain_filter: ChainFilter<T>,
+    not_while_syncing_filter: NotWhileSyncingFilter,
+    task_spawner_filter: TaskSpawnerFilter<T>,
+) -> ResponseFilter {
+    use crate::version::{ResponseIncludesVersion, add_consensus_version_header, beacon_response};
+
+    eth_v1
+        .and(warp::path("validator"))
+        .and(warp::path("payload_attestation_data"))
+        .and(warp::path::param::<Slot>().or_else(|_| async {
+            Err(warp_utils::reject::custom_bad_request(
+                "Invalid slot".to_string(),
+            ))
+        }))
+        .and(warp::path::end())
+        .and(not_while_syncing_filter)
+        .and(task_spawner_filter)
+        .and(chain_filter)
+        .then(
+            |slot: Slot,
+             not_synced_filter: Result<(), Rejection>,
+             task_spawner: TaskSpawner<T::EthSpec>,
+             chain: Arc<BeaconChain<T>>| {
+                task_spawner.blocking_response_task(Priority::P0, move || {
+                    not_synced_filter?;
+
+                    let fork_name = chain.spec.fork_name_at_slot::<T::EthSpec>(slot);
+
+                    // Payload attestations are only valid for Gloas and later forks
+                    if !fork_name.gloas_enabled() {
+                        return Err(warp_utils::reject::custom_bad_request(format!(
+                            "Payload attestations are not supported for fork: {fork_name}"
+                        )));
+                    }
+
+                    let payload_attestation_data =
+                        chain.produce_payload_attestation_data(slot).map_err(|e| {
+                            warp_utils::reject::custom_server_error(format!(
+                                "Unable to produce payload attestation data: {e:?}"
+                            ))
+                        })?;
+
+                    Ok(add_consensus_version_header(
+                        warp::reply::json(&beacon_response(
+                            ResponseIncludesVersion::Yes(fork_name),
+                            payload_attestation_data,
+                        ))
+                        .into_response(),
+                        fork_name,
+                    ))
+                })
+            },
+        )
+        .boxed()
+}
+
 // GET validator/blinded_blocks/{slot}
 pub fn get_validator_blinded_blocks<T: BeaconChainTypes>(
     eth_v1: EthV1Filter,

@@ -2537,44 +2537,12 @@ pub fn serve<T: BeaconChainTypes>(
     );
 
     // GET validator/payload_attestation_data/{slot}
-    let get_validator_payload_attestation_data = eth_v1
-        .clone()
-        .and(warp::path("validator"))
-        .and(warp::path("payload_attestation_data"))
-        .and(warp::path::param::<Slot>().or_else(|_| async {
-            Err(warp_utils::reject::custom_bad_request(
-                "Invalid slot".to_string(),
-            ))
-        }))
-        .and(warp::path::end())
-        .and(not_while_syncing_filter.clone())
-        .and(task_spawner_filter.clone())
-        .and(chain_filter.clone())
-        .then(
-            |slot: Slot,
-             not_synced_filter: Result<(), Rejection>,
-             task_spawner: TaskSpawner<T::EthSpec>,
-             chain: Arc<BeaconChain<T>>| {
-                task_spawner.blocking_response_task(Priority::P0, move || {
-                    not_synced_filter?;
-
-                    let fork_name = chain.spec.fork_name_at_slot::<T::EthSpec>(slot);
-
-                    let payload_attestation_data = chain
-                        .produce_payload_attestation_data(slot)
-                        .map_err(warp_utils::reject::unhandled_error)?;
-
-                    Ok(add_consensus_version_header(
-                        warp::reply::json(&beacon_response(
-                            ResponseIncludesVersion::Yes(fork_name),
-                            payload_attestation_data,
-                        ))
-                        .into_response(),
-                        fork_name,
-                    ))
-                })
-            },
-        );
+    let get_validator_payload_attestation_data = get_validator_payload_attestation_data(
+        eth_v1.clone(),
+        chain_filter.clone(),
+        not_while_syncing_filter.clone(),
+        task_spawner_filter.clone(),
+    );
 
     // GET validator/aggregate_attestation?attestation_data_root,slot
     let get_validator_aggregate_attestation = get_validator_aggregate_attestation(
