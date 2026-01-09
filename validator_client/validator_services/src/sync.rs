@@ -285,6 +285,8 @@ pub async fn poll_sync_committee_duties<S: ValidatorStore + 'static, T: SlotCloc
         .altair_fork_epoch
         .is_none_or(|altair_epoch| current_epoch < altair_epoch)
     {
+        // Signal that sync committee duty polling is complete for this slot.
+        duties_service.sync_poll_tx.send_replace(current_slot);
         return Ok(());
     }
 
@@ -322,6 +324,9 @@ pub async fn poll_sync_committee_duties<S: ValidatorStore + 'static, T: SlotCloc
         // Prune previous duties (we avoid doing this too often as it locks the whole map).
         sync_duties.prune(current_sync_committee_period);
     }
+
+    // Signal that sync committee duty polling is complete for this slot.
+    duties_service.sync_poll_tx.send_replace(current_slot);
 
     // Pre-compute aggregator selection proofs for the current period.
     let (current_pre_compute_slot, new_pre_compute_duties) = sync_duties

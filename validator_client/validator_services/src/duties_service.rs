@@ -28,7 +28,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use task_executor::TaskExecutor;
-use tokio::{sync::mpsc::Sender, time::sleep};
+use tokio::{
+    sync::{mpsc::Sender, watch},
+    time::sleep,
+};
 use tracing::{debug, error, info, warn};
 use types::{ChainSpec, Epoch, EthSpec, Hash256, SelectionProof, Slot};
 use validator_metrics::{ATTESTATION_DUTY, get_int_gauge, set_int_gauge};
@@ -373,6 +376,9 @@ impl<S, T> DutiesServiceBuilder<S, T> {
     }
 
     pub fn build(self) -> Result<DutiesService<S, T>, String> {
+        let (attesters_poll_tx, _) = watch::channel(Slot::default());
+        let (sync_poll_tx, _) = watch::channel(Slot::default());
+
         Ok(DutiesService {
             attesters: Default::default(),
             proposers: Default::default(),
@@ -394,6 +400,8 @@ impl<S, T> DutiesServiceBuilder<S, T> {
             enable_high_validator_count_metrics: self.enable_high_validator_count_metrics,
             selection_proof_config: self.attestation_selection_proof_config,
             disable_attesting: self.disable_attesting,
+            attesters_poll_tx,
+            sync_poll_tx,
         })
     }
 }
@@ -424,6 +432,10 @@ pub struct DutiesService<S, T> {
     /// Pass the config for distributed or non-distributed mode.
     pub selection_proof_config: SelectionProofConfig,
     pub disable_attesting: bool,
+    /// Watch channel sender for signaling when attestation duty polling completes.
+    pub(crate) attesters_poll_tx: watch::Sender<Slot>,
+    /// Watch channel sender for signaling when sync committee duty polling completes.
+    pub(crate) sync_poll_tx: watch::Sender<Slot>,
 }
 
 impl<S: ValidatorStore, T: SlotClock + 'static> DutiesService<S, T> {
@@ -526,6 +538,16 @@ impl<S: ValidatorStore, T: SlotClock + 'static> DutiesService<S, T> {
     pub fn per_validator_metrics(&self) -> bool {
         self.enable_high_validator_count_metrics
             || self.total_validator_count() <= VALIDATOR_METRICS_MIN_COUNT
+    }
+
+    /// Subscribe to notifications when attestation duty polling completes.
+    pub fn subscribe_to_attesters_poll(&self) -> watch::Receiver<Slot> {
+        self.attesters_poll_tx.subscribe()
+    }
+
+    /// Subscribe to notifications when sync committee duty polling completes.
+    pub fn subscribe_to_sync_poll(&self) -> watch::Receiver<Slot> {
+        self.sync_poll_tx.subscribe()
     }
 }
 
@@ -974,12 +996,19 @@ async fn poll_beacon_attesters_for_epoch<S: ValidatorStore + 'static, T: SlotClo
     local_indices: &[u64],
     local_pubkeys: &HashSet<PublicKeyBytes>,
 ) -> Result<(), Error<S::Error>> {
+    let current_slot = duties_service
+        .slot_clock
+        .now_or_genesis()
+        .unwrap_or_default();
+
     // No need to bother the BN if we don't have any validators.
     if local_indices.is_empty() {
         debug!(
             %epoch,
             "No validators, not downloading duties"
         );
+        // Signal that sync committee duty polling is complete for this slot.
+        duties_service.attesters_poll_tx.send_replace(current_slot);
         return Ok(());
     }
 
@@ -1020,8 +1049,10 @@ async fn poll_beacon_attesters_for_epoch<S: ValidatorStore + 'static, T: SlotClo
             .collect::<Vec<_>>()
     };
 
+    // No validators have conflicting (epoch, dependent_root) values or missing duties for the epoch.
     if validators_to_update.is_empty() {
-        // No validators have conflicting (epoch, dependent_root) values or missing duties for the epoch.
+        // Signal that sync committee duty polling is complete for this slot.
+        duties_service.attesters_poll_tx.send_replace(current_slot);
         return Ok(());
     }
 
@@ -1065,10 +1096,6 @@ async fn poll_beacon_attesters_for_epoch<S: ValidatorStore + 'static, T: SlotClo
     // Update the duties service with the new `DutyAndProof` messages.
     let mut attesters = duties_service.attesters.write();
     let mut already_warned = Some(());
-    let current_slot = duties_service
-        .slot_clock
-        .now_or_genesis()
-        .unwrap_or_default();
     for duty in &new_duties {
         let attester_map = attesters.entry(duty.pubkey).or_default();
 
@@ -1114,6 +1141,9 @@ async fn poll_beacon_attesters_for_epoch<S: ValidatorStore + 'static, T: SlotClo
         }
     }
     drop(attesters);
+
+    // Signal that attestation duty polling is complete for this slot.
+    duties_service.attesters_poll_tx.send_replace(current_slot);
 
     // Spawn the background task to compute selection proofs.
     let subservice = duties_service.clone();
