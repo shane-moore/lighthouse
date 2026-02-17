@@ -1,6 +1,5 @@
 use crate::duties_service::{DutiesService, DutyAndProof};
 use beacon_node_fallback::{ApiTopic, BeaconNodeFallback, beacon_head_monitor::HeadEvent};
-use futures::future::join_all;
 use logging::crit;
 use slot_clock::SlotClock;
 use std::collections::HashMap;
@@ -12,8 +11,10 @@ use tokio::sync::mpsc;
 use tokio::time::{Duration, Instant, sleep, sleep_until};
 use tracing::{Instrument, debug, error, info, info_span, instrument, warn};
 use tree_hash::TreeHash;
-use types::{Attestation, AttestationData, ChainSpec, CommitteeIndex, EthSpec, Hash256, Slot};
-use validator_store::{Error as ValidatorStoreError, ValidatorStore};
+use types::{
+    Attestation, AttestationData, ChainSpec, CommitteeIndex, EthSpec, ForkName, Hash256, Slot,
+};
+use validator_store::ValidatorStore;
 
 /// Builds an `AttestationService`.
 #[derive(Default)]
@@ -494,6 +495,10 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> AttestationService<S, 
     ///
     /// The given `validator_duties` should already be filtered to only contain those that match
     /// `slot`. Critical errors will be logged if this is not the case.
+    ///
+    /// When `parallel_sign` is true (DVT/distributed mode), attestation batches from the channel
+    /// are published incrementally as each batch arrives. When false (standard mode), all batches
+    /// are collected first and published in a single request.
     #[instrument(skip_all, fields(%slot, %attestation_data.beacon_block_root))]
     async fn sign_and_publish_attestations(
         &self,
@@ -573,29 +578,72 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> AttestationService<S, 
             return Ok(());
         }
 
-        // Sign and check all attestations (includes slashing protection).
-        let safe_attestations = self
+        // Sign attestations. Returns a channel that yields batches of signed attestations.
+        // For standard Lighthouse, a single batch is sent. For DVT, multiple batches may
+        // arrive (one per committee) allowing incremental publishing.
+        let mut rx = self
             .validator_store
             .sign_attestations(attestations_to_sign)
             .await
             .map_err(|e| format!("Failed to sign attestations: {e:?}"))?;
 
-        if safe_attestations.is_empty() {
-            warn!("No attestations were published");
-            return Ok(());
-        }
         let fork_name = self
             .chain_spec
             .fork_name_at_slot::<S::E>(attestation_data.slot);
 
-        let single_attestations = safe_attestations
+        if self.duties_service.selection_proof_config.parallel_sign {
+            // Streaming path: publish each batch from the channel as it arrives.
+            // This allows fast committees to be published without waiting for slow ones.
+            while let Some(batch) = rx.recv().await {
+                if !batch.is_empty() {
+                    self.publish_attestation_batch(
+                        &batch,
+                        fork_name,
+                        &attestation_data,
+                        slot,
+                    )
+                    .await;
+                }
+            }
+        } else {
+            // Collect-all path: identical to previous behavior. Collect all batches from
+            // the channel, then publish once.
+            let mut all_attestations = Vec::new();
+            while let Some(batch) = rx.recv().await {
+                all_attestations.extend(batch);
+            }
+            if all_attestations.is_empty() {
+                warn!("No attestations were published");
+                return Ok(());
+            }
+            self.publish_attestation_batch(
+                &all_attestations,
+                fork_name,
+                &attestation_data,
+                slot,
+            )
+            .await;
+        }
+
+        Ok(())
+    }
+
+    /// Publish a batch of signed attestations to the beacon node.
+    ///
+    /// Handles SingleAttestation conversion, BN posting, metrics, and logging.
+    async fn publish_attestation_batch(
+        &self,
+        attestations: &[(u64, Attestation<S::E>)],
+        fork_name: ForkName,
+        attestation_data: &AttestationData,
+        slot: Slot,
+    ) {
+        let single_attestations = attestations
             .iter()
             .filter_map(|(i, a)| {
                 match a.to_single_attestation_with_attester_index(*i) {
                     Ok(a) => Some(a),
                     Err(e) => {
-                        // This shouldn't happen unless BN and VC are out of sync with
-                        // respect to the Electra fork.
                         error!(
                             error = ?e,
                             committee_index = attestation_data.index,
@@ -615,7 +663,6 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> AttestationService<S, 
             .collect::<Vec<_>>();
         let published_count = single_attestations.len();
 
-        // Post the attestations to the BN.
         match self
             .beacon_nodes
             .request(ApiTopic::Attestations, |beacon_node| async move {
@@ -651,8 +698,6 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> AttestationService<S, 
                 "Unable to publish attestations"
             ),
         }
-
-        Ok(())
     }
 
     /// Performs the second step of the attesting process: downloading an aggregated `Attestation`,
@@ -725,117 +770,120 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> AttestationService<S, 
             .await
             .map_err(|e| e.to_string())?;
 
-        // Create futures to produce the signed aggregated attestations.
-        let signing_futures = validator_duties.iter().map(|duty_and_proof| async move {
-            let duty = &duty_and_proof.duty;
-            let selection_proof = duty_and_proof.selection_proof.as_ref()?;
+        // Build the batch of aggregates to sign.
+        let aggregates_to_sign: Vec<_> = validator_duties
+            .iter()
+            .filter_map(|duty_and_proof| {
+                let duty = &duty_and_proof.duty;
+                let selection_proof = duty_and_proof.selection_proof.as_ref()?;
 
-            if !duty.match_attestation_data::<S::E>(attestation_data, &self.chain_spec) {
-                crit!("Inconsistent validator duties during signing");
-                return None;
-            }
+                if !duty.match_attestation_data::<S::E>(attestation_data, &self.chain_spec) {
+                    crit!("Inconsistent validator duties during signing");
+                    return None;
+                }
 
-            match self
-                .validator_store
-                .produce_signed_aggregate_and_proof(
+                Some((
                     duty.pubkey,
                     duty.validator_index,
                     aggregated_attestation.clone(),
                     selection_proof.clone(),
-                )
-                .await
-            {
-                Ok(aggregate) => Some(aggregate),
-                Err(ValidatorStoreError::UnknownPubkey(pubkey)) => {
-                    // A pubkey can be missing when a validator was recently
-                    // removed via the API.
-                    debug!(?pubkey, "Missing pubkey for aggregate");
-                    None
-                }
-                Err(e) => {
-                    crit!(
-                        error = ?e,
-                        pubkey = ?duty.pubkey,
-                        "Failed to sign aggregate"
-                    );
-                    None
+                ))
+            })
+            .collect();
+
+        if aggregates_to_sign.is_empty() {
+            return Ok(());
+        }
+
+        // Sign aggregates. Returns a channel that yields batches of signed aggregates.
+        let mut rx = self
+            .validator_store
+            .sign_aggregate_and_proofs(aggregates_to_sign)
+            .await
+            .map_err(|e| format!("Failed to sign aggregates: {e:?}"))?;
+
+        if self.duties_service.selection_proof_config.parallel_sign {
+            // Streaming path: publish each batch as it arrives.
+            while let Some(batch) = rx.recv().await {
+                if !batch.is_empty() {
+                    self.publish_aggregate_batch(&batch, fork_name).await;
                 }
             }
-        });
-
-        // Execute all the futures in parallel, collecting any successful results.
-        let aggregator_count = validator_duties
-            .iter()
-            .filter(|d| d.selection_proof.is_some())
-            .count();
-        let signed_aggregate_and_proofs = join_all(signing_futures)
-            .instrument(info_span!("sign_aggregates", count = aggregator_count))
-            .await
-            .into_iter()
-            .flatten()
-            .collect::<Vec<_>>();
-
-        if !signed_aggregate_and_proofs.is_empty() {
-            let signed_aggregate_and_proofs_slice = signed_aggregate_and_proofs.as_slice();
-            match self
-                .beacon_nodes
-                .first_success(|beacon_node| async move {
-                    let _timer = validator_metrics::start_timer_vec(
-                        &validator_metrics::ATTESTATION_SERVICE_TIMES,
-                        &[validator_metrics::AGGREGATES_HTTP_POST],
-                    );
-                    if fork_name.electra_enabled() {
-                        beacon_node
-                            .post_validator_aggregate_and_proof_v2(
-                                signed_aggregate_and_proofs_slice,
-                                fork_name,
-                            )
-                            .await
-                    } else {
-                        beacon_node
-                            .post_validator_aggregate_and_proof_v1(
-                                signed_aggregate_and_proofs_slice,
-                            )
-                            .await
-                    }
-                })
-                .instrument(info_span!(
-                    "publish_aggregates",
-                    count = signed_aggregate_and_proofs.len()
-                ))
-                .await
-            {
-                Ok(()) => {
-                    for signed_aggregate_and_proof in signed_aggregate_and_proofs {
-                        let attestation = signed_aggregate_and_proof.message().aggregate();
-                        info!(
-                            aggregator = signed_aggregate_and_proof.message().aggregator_index(),
-                            signatures = attestation.num_set_aggregation_bits(),
-                            head_block = format!("{:?}", attestation.data().beacon_block_root),
-                            committee_index = attestation.committee_index(),
-                            slot = attestation.data().slot.as_u64(),
-                            "type" = "aggregated",
-                            "Successfully published attestation"
-                        );
-                    }
-                }
-                Err(e) => {
-                    for signed_aggregate_and_proof in signed_aggregate_and_proofs {
-                        let attestation = &signed_aggregate_and_proof.message().aggregate();
-                        crit!(
-                            error = %e,
-                            aggregator = signed_aggregate_and_proof.message().aggregator_index(),
-                            committee_index = attestation.committee_index(),
-                            slot = attestation.data().slot.as_u64(),
-                            "type" = "aggregated",
-                            "Failed to publish attestation"
-                        );
-                    }
-                }
+        } else {
+            // Collect-all path: identical to previous behavior.
+            let mut all_aggregates = Vec::new();
+            while let Some(batch) = rx.recv().await {
+                all_aggregates.extend(batch);
+            }
+            if !all_aggregates.is_empty() {
+                self.publish_aggregate_batch(&all_aggregates, fork_name)
+                    .await;
             }
         }
 
         Ok(())
+    }
+
+    /// Publish a batch of signed aggregate and proofs to the beacon node.
+    async fn publish_aggregate_batch(
+        &self,
+        signed_aggregate_and_proofs: &[types::SignedAggregateAndProof<S::E>],
+        fork_name: ForkName,
+    ) {
+        match self
+            .beacon_nodes
+            .first_success(|beacon_node| async move {
+                let _timer = validator_metrics::start_timer_vec(
+                    &validator_metrics::ATTESTATION_SERVICE_TIMES,
+                    &[validator_metrics::AGGREGATES_HTTP_POST],
+                );
+                if fork_name.electra_enabled() {
+                    beacon_node
+                        .post_validator_aggregate_and_proof_v2(
+                            signed_aggregate_and_proofs,
+                            fork_name,
+                        )
+                        .await
+                } else {
+                    beacon_node
+                        .post_validator_aggregate_and_proof_v1(signed_aggregate_and_proofs)
+                        .await
+                }
+            })
+            .instrument(info_span!(
+                "publish_aggregates",
+                count = signed_aggregate_and_proofs.len()
+            ))
+            .await
+        {
+            Ok(()) => {
+                for signed_aggregate_and_proof in signed_aggregate_and_proofs {
+                    let attestation = signed_aggregate_and_proof.message().aggregate();
+                    info!(
+                        aggregator = signed_aggregate_and_proof.message().aggregator_index(),
+                        signatures = attestation.num_set_aggregation_bits(),
+                        head_block = format!("{:?}", attestation.data().beacon_block_root),
+                        committee_index = attestation.committee_index(),
+                        slot = attestation.data().slot.as_u64(),
+                        "type" = "aggregated",
+                        "Successfully published attestation"
+                    );
+                }
+            }
+            Err(e) => {
+                for signed_aggregate_and_proof in signed_aggregate_and_proofs {
+                    let attestation = &signed_aggregate_and_proof.message().aggregate();
+                    crit!(
+                        error = %e,
+                        aggregator = signed_aggregate_and_proof.message().aggregator_index(),
+                        committee_index = attestation.committee_index(),
+                        slot = attestation.data().slot.as_u64(),
+                        "type" = "aggregated",
+                        "Failed to publish attestation"
+                    );
+                }
+            }
+        }
     }
 
     /// Spawn a blocking task to run the slashing protection pruning process.

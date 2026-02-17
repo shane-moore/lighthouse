@@ -9709,6 +9709,7 @@ dependencies = [
  "bls",
  "eth2",
  "slashing_protection",
+ "tokio",
  "types",
 ]
 

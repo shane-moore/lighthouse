@@ -8,4 +8,5 @@ authors = ["Sigma Prime <contact@sigmaprime.io>"]
 bls = { workspace = true }
 eth2 = { workspace = true }
 slashing_protection = { workspace = true }
+tokio = { workspace = true }
 types = { workspace = true }

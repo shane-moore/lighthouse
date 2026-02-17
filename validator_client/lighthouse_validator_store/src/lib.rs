@@ -885,7 +885,7 @@ impl<T: SlotClock + 'static, E: EthSpec> ValidatorStore for LighthouseValidatorS
     async fn sign_attestations(
         self: &Arc<Self>,
         mut attestations: Vec<(u64, PublicKeyBytes, usize, Attestation<Self::E>)>,
-    ) -> Result<Vec<(u64, Attestation<E>)>, Error> {
+    ) -> Result<tokio::sync::mpsc::Receiver<Vec<(u64, Attestation<E>)>>, Error> {
         // Sign all attestations concurrently.
         let signing_futures =
             attestations
@@ -931,8 +931,12 @@ impl<T: SlotClock + 'static, E: EthSpec> ValidatorStore for LighthouseValidatorS
             }
         }
 
+        // Wrap result in a channel. For Lighthouse, this is a single batch containing all
+        // attestations, identical in behavior to the previous Vec return type.
+        let (tx, rx) = tokio::sync::mpsc::channel(1);
+
         if signed_attestations.is_empty() {
-            return Ok(vec![]);
+            return Ok(rx);
         }
 
         // Check slashing protection and insert into database. Use a dedicated blocking thread
@@ -947,7 +951,10 @@ impl<T: SlotClock + 'static, E: EthSpec> ValidatorStore for LighthouseValidatorS
             .ok_or(Error::ExecutorError)?
             .await
             .map_err(|_| Error::ExecutorError)??;
-        Ok(safe_attestations)
+
+        // Send the single batch. If the receiver is already dropped, that's fine.
+        let _ = tx.send(safe_attestations).await;
+        Ok(rx)
     }
 
     async fn sign_validator_registration_data(
@@ -1164,6 +1171,126 @@ impl<T: SlotClock + 'static, E: EthSpec> ValidatorStore for LighthouseValidatorS
         );
 
         Ok(SignedContributionAndProof { message, signature })
+    }
+
+    async fn sign_aggregate_and_proofs(
+        self: &Arc<Self>,
+        aggregates: Vec<(PublicKeyBytes, u64, Attestation<E>, SelectionProof)>,
+    ) -> Result<tokio::sync::mpsc::Receiver<Vec<SignedAggregateAndProof<E>>>, Error> {
+        let signing_futures = aggregates.into_iter().map(
+            |(pubkey, aggregator_index, aggregate, selection_proof)| async move {
+                match self
+                    .produce_signed_aggregate_and_proof(
+                        pubkey,
+                        aggregator_index,
+                        aggregate,
+                        selection_proof,
+                    )
+                    .await
+                {
+                    Ok(signed) => Some(signed),
+                    Err(ValidatorStoreError::UnknownPubkey(pubkey)) => {
+                        warn!(
+                            info = "a validator may have recently been removed from this VC",
+                            ?pubkey,
+                            "Missing pubkey for aggregate"
+                        );
+                        None
+                    }
+                    Err(e) => {
+                        crit!(error = ?e, "Failed to sign aggregate");
+                        None
+                    }
+                }
+            },
+        );
+
+        let results: Vec<_> = join_all(signing_futures).await.into_iter().flatten().collect();
+        let (tx, rx) = tokio::sync::mpsc::channel(1);
+        if !results.is_empty() {
+            let _ = tx.send(results).await;
+        }
+        Ok(rx)
+    }
+
+    async fn sign_sync_committee_signatures(
+        self: &Arc<Self>,
+        messages: Vec<(Slot, Hash256, u64, PublicKeyBytes)>,
+    ) -> Result<tokio::sync::mpsc::Receiver<Vec<SyncCommitteeMessage>>, Error> {
+        let signing_futures = messages.into_iter().map(
+            |(slot, beacon_block_root, validator_index, pubkey)| async move {
+                match self
+                    .produce_sync_committee_signature(
+                        slot,
+                        beacon_block_root,
+                        validator_index,
+                        &pubkey,
+                    )
+                    .await
+                {
+                    Ok(sig) => Some(sig),
+                    Err(ValidatorStoreError::UnknownPubkey(pubkey)) => {
+                        warn!(
+                            info = "a validator may have recently been removed from this VC",
+                            ?pubkey,
+                            "Missing pubkey for sync committee signature"
+                        );
+                        None
+                    }
+                    Err(e) => {
+                        crit!(error = ?e, "Failed to sign sync committee message");
+                        None
+                    }
+                }
+            },
+        );
+
+        let results: Vec<_> = join_all(signing_futures).await.into_iter().flatten().collect();
+        let (tx, rx) = tokio::sync::mpsc::channel(1);
+        if !results.is_empty() {
+            let _ = tx.send(results).await;
+        }
+        Ok(rx)
+    }
+
+    async fn sign_sync_committee_contributions(
+        self: &Arc<Self>,
+        contributions: Vec<(u64, PublicKeyBytes, SyncCommitteeContribution<E>, SyncSelectionProof)>,
+    ) -> Result<tokio::sync::mpsc::Receiver<Vec<SignedContributionAndProof<E>>>, Error> {
+        let signing_futures = contributions.into_iter().map(
+            |(aggregator_index, aggregator_pubkey, contribution, selection_proof)| async move {
+                match self
+                    .produce_signed_contribution_and_proof(
+                        aggregator_index,
+                        aggregator_pubkey,
+                        contribution,
+                        selection_proof,
+                    )
+                    .await
+                {
+                    Ok(signed) => Some(signed),
+                    Err(ValidatorStoreError::UnknownPubkey(pubkey)) => {
+                        warn!(
+                            info = "a validator may have recently been removed from this VC",
+                            ?pubkey,
+                            "Missing pubkey for sync contribution"
+                        );
+                        None
+                    }
+                    Err(e) => {
+                        crit!(error = ?e, "Failed to sign sync committee contribution");
+                        None
+                    }
+                }
+            },
+        );
+
+        let results: Vec<_> = join_all(signing_futures).await.into_iter().flatten().collect();
+        let (tx, rx) = tokio::sync::mpsc::channel(1);
+        if !results.is_empty() {
+            let _ = tx.send(results).await;
+        }
+        Ok(rx)
     }
 
     /// Prune the slashing protection database so that it remains performant.
