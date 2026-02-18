@@ -1,5 +1,7 @@
 use crate::duties_service::{DutiesService, DutyAndProof};
 use beacon_node_fallback::{ApiTopic, BeaconNodeFallback, beacon_head_monitor::HeadEvent};
+use futures::future::join_all;
+use futures::stream::{FuturesUnordered, StreamExt};
 use logging::crit;
 use slot_clock::SlotClock;
 use std::collections::HashMap;
@@ -14,7 +16,7 @@ use tree_hash::TreeHash;
 use types::{
     Attestation, AttestationData, ChainSpec, CommitteeIndex, EthSpec, ForkName, Hash256, Slot,
 };
-use validator_store::ValidatorStore;
+use validator_store::{Error as ValidatorStoreError, ValidatorStore};
 
 /// Builds an `AttestationService`.
 #[derive(Default)]
@@ -770,53 +772,98 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> AttestationService<S, 
             .await
             .map_err(|e| e.to_string())?;
 
-        // Build the batch of aggregates to sign.
-        let aggregates_to_sign: Vec<_> = validator_duties
+        // Create futures to produce the signed aggregated attestations.
+        let parallel_sign = self.duties_service.selection_proof_config.parallel_sign;
+        let signing_futures = validator_duties.iter().map(|duty_and_proof| async move {
+            let duty = &duty_and_proof.duty;
+            let selection_proof = duty_and_proof.selection_proof.as_ref()?;
+
+            if !duty.match_attestation_data::<S::E>(attestation_data, &self.chain_spec) {
+                crit!("Inconsistent validator duties during signing");
+                return None;
+            }
+
+            let signing_fut = self.validator_store.produce_signed_aggregate_and_proof(
+                duty.pubkey,
+                duty.validator_index,
+                aggregated_attestation.clone(),
+                selection_proof.clone(),
+            );
+
+            let result = if parallel_sign {
+                match tokio::time::timeout(Duration::from_secs(4), signing_fut).await {
+                    Ok(result) => result,
+                    Err(_) => {
+                        warn!(
+                            pubkey = ?duty.pubkey,
+                            "Aggregate signing timed out after 4s"
+                        );
+                        return None;
+                    }
+                }
+            } else {
+                signing_fut.await
+            };
+
+            match result {
+                Ok(aggregate) => Some(aggregate),
+                Err(ValidatorStoreError::UnknownPubkey(pubkey)) => {
+                    // A pubkey can be missing when a validator was recently
+                    // removed via the API.
+                    debug!(?pubkey, "Missing pubkey for aggregate");
+                    None
+                }
+                Err(e) => {
+                    crit!(
+                        error = ?e,
+                        pubkey = ?duty.pubkey,
+                        "Failed to sign aggregate"
+                    );
+                    None
+                }
+            }
+        });
+
+        let aggregator_count = validator_duties
             .iter()
-            .filter_map(|duty_and_proof| {
-                let duty = &duty_and_proof.duty;
-                let selection_proof = duty_and_proof.selection_proof.as_ref()?;
+            .filter(|d| d.selection_proof.is_some())
+            .count();
 
-                if !duty.match_attestation_data::<S::E>(attestation_data, &self.chain_spec) {
-                    crit!("Inconsistent validator duties during signing");
-                    return None;
+        if parallel_sign {
+            // Streaming path: publish batches on a timer as signing completes,
+            // so fast SSV committees don't wait for slow ones.
+            let mut signing_stream: FuturesUnordered<_> = signing_futures.collect();
+            let mut batch = Vec::new();
+            let mut interval = tokio::time::interval(Duration::from_millis(50));
+            interval.tick().await; // consume the immediate first tick
+            loop {
+                tokio::select! {
+                    Some(result) = signing_stream.next() => {
+                        if let Some(signed) = result {
+                            batch.push(signed);
+                        }
+                    }
+                    _ = interval.tick(), if !batch.is_empty() => {
+                        self.publish_aggregate_batch(&batch, fork_name).await;
+                        batch.clear();
+                    }
+                    else => break,
                 }
-
-                Some((
-                    duty.pubkey,
-                    duty.validator_index,
-                    aggregated_attestation.clone(),
-                    selection_proof.clone(),
-                ))
-            })
-            .collect();
-
-        if aggregates_to_sign.is_empty() {
-            return Ok(());
-        }
-
-        // Sign aggregates. Returns a channel that yields batches of signed aggregates.
-        let mut rx = self
-            .validator_store
-            .sign_aggregate_and_proofs(aggregates_to_sign)
-            .await
-            .map_err(|e| format!("Failed to sign aggregates: {e:?}"))?;
-
-        if self.duties_service.selection_proof_config.parallel_sign {
-            // Streaming path: publish each batch as it arrives.
-            while let Some(batch) = rx.recv().await {
-                if !batch.is_empty() {
-                    self.publish_aggregate_batch(&batch, fork_name).await;
-                }
+            }
+            if !batch.is_empty() {
+                self.publish_aggregate_batch(&batch, fork_name).await;
             }
         } else {
             // Collect-all path: identical to previous behavior.
-            let mut all_aggregates = Vec::new();
-            while let Some(batch) = rx.recv().await {
-                all_aggregates.extend(batch);
-            }
-            if !all_aggregates.is_empty() {
-                self.publish_aggregate_batch(&all_aggregates, fork_name)
+            let signed_aggregate_and_proofs = join_all(signing_futures)
+                .instrument(info_span!("sign_aggregates", count = aggregator_count))
+                .await
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>();
+
+            if !signed_aggregate_and_proofs.is_empty() {
+                self.publish_aggregate_batch(&signed_aggregate_and_proofs, fork_name)
                     .await;
             }
         }
@@ -846,7 +893,9 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> AttestationService<S, 
                         .await
                 } else {
                     beacon_node
-                        .post_validator_aggregate_and_proof_v1(signed_aggregate_and_proofs)
+                        .post_validator_aggregate_and_proof_v1(
+                            signed_aggregate_and_proofs,
+                        )
                         .await
                 }
             })

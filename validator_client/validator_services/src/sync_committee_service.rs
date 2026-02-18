@@ -2,7 +2,8 @@ use crate::duties_service::DutiesService;
 use beacon_node_fallback::{ApiTopic, BeaconNodeFallback};
 use bls::PublicKeyBytes;
 use eth2::types::BlockId;
-use futures::future::FutureExt;
+use futures::future::{FutureExt, join_all};
+use futures::stream::{FuturesUnordered, StreamExt};
 use logging::crit;
 use slot_clock::SlotClock;
 use std::collections::HashMap;
@@ -16,7 +17,7 @@ use types::{
     ChainSpec, EthSpec, Hash256, Slot, SyncCommitteeMessage, SyncCommitteeSubscription,
     SyncContributionData, SyncDuty, SyncSelectionProof, SyncSubnetId,
 };
-use validator_store::ValidatorStore;
+use validator_store::{Error as ValidatorStoreError, ValidatorStore};
 
 pub const SUBSCRIPTION_LOOKAHEAD_EPOCHS: u64 = 4;
 
@@ -240,54 +241,133 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> SyncCommitteeService<S
 
     /// Publish sync committee signatures.
     #[instrument(skip_all, fields(%slot, ?beacon_block_root))]
+    /// Publish sync committee signatures.
+    #[instrument(skip_all, fields(%slot, ?beacon_block_root))]
     async fn publish_sync_committee_signatures(
         &self,
         slot: Slot,
         beacon_block_root: Hash256,
         validator_duties: Vec<SyncDuty>,
     ) -> Result<(), ()> {
-        // Build the batch of sync committee messages to sign.
-        let messages_to_sign: Vec<_> = validator_duties
-            .iter()
-            .map(|duty| (slot, beacon_block_root, duty.validator_index, duty.pubkey))
-            .collect();
-
-        if messages_to_sign.is_empty() {
-            return Ok(());
-        }
-
-        // Sign sync committee messages. Returns a channel that yields batches.
-        let mut rx = self
-            .validator_store
-            .sign_sync_committee_signatures(messages_to_sign)
-            .await
-            .map_err(|e| {
-                crit!(%slot, error = ?e, "Failed to sign sync committee signatures");
-            })?;
-
-        if self
+        // Create futures to produce sync committee signatures.
+        let parallel_sign = self
             .duties_service
             .sync_duties
             .selection_proof_config
-            .parallel_sign
-        {
-            // Streaming path: publish each batch as it arrives.
-            while let Some(batch) = rx.recv().await {
-                if !batch.is_empty() {
-                    self.publish_sync_signature_batch(&batch, slot, beacon_block_root)
-                        .await?;
+            .parallel_sign;
+
+        let signature_futures = validator_duties.iter().map(|duty| async move {
+            let signing_fut = self.validator_store.produce_sync_committee_signature(
+                slot,
+                beacon_block_root,
+                duty.validator_index,
+                &duty.pubkey,
+            );
+
+            let result = if parallel_sign {
+                match tokio::time::timeout(Duration::from_secs(4), signing_fut).await {
+                    Ok(result) => result,
+                    Err(_) => {
+                        warn!(
+                            validator_index = duty.validator_index,
+                            %slot,
+                            "Sync committee signing timed out after 4s"
+                        );
+                        return None;
+                    }
                 }
+            } else {
+                signing_fut.await
+            };
+
+            match result {
+                Ok(signature) => Some(signature),
+                Err(ValidatorStoreError::UnknownPubkey(pubkey)) => {
+                    // A pubkey can be missing when a validator was recently
+                    // removed via the API.
+                    debug!(
+                        ?pubkey,
+                        validator_index = duty.validator_index,
+                        %slot,
+                        "Missing pubkey for sync committee signature"
+                    );
+                    None
+                }
+                Err(e) => {
+                    crit!(
+                        validator_index = duty.validator_index,
+                        %slot,
+                        error = ?e,
+                        "Failed to sign sync committee signature"
+                    );
+                    None
+                }
+            }
+        });
+
+        if parallel_sign {
+            // Streaming path: publish batches on a timer as signing completes,
+            // so fast SSV committees don't wait for slow ones.
+            let mut signing_stream: FuturesUnordered<_> = signature_futures.collect();
+            let mut batch = Vec::new();
+            let mut interval = tokio::time::interval(Duration::from_millis(50));
+            interval.tick().await; // consume the immediate first tick
+            loop {
+                tokio::select! {
+                    Some(result) = signing_stream.next() => {
+                        if let Some(sig) = result {
+                            batch.push(sig);
+                        }
+                    }
+                    _ = interval.tick(), if !batch.is_empty() => {
+                        self.publish_sync_signature_batch(&batch, slot, beacon_block_root)
+                            .await?;
+                        batch.clear();
+                    }
+                    else => break,
+                }
+            }
+            if !batch.is_empty() {
+                self.publish_sync_signature_batch(&batch, slot, beacon_block_root)
+                    .await?;
             }
         } else {
             // Collect-all path: identical to previous behavior.
-            let mut all_signatures = Vec::new();
-            while let Some(batch) = rx.recv().await {
-                all_signatures.extend(batch);
-            }
-            if !all_signatures.is_empty() {
-                self.publish_sync_signature_batch(&all_signatures, slot, beacon_block_root)
-                    .await?;
-            }
+            let committee_signatures = &join_all(signature_futures)
+                .instrument(info_span!(
+                    "sign_sync_signatures",
+                    count = validator_duties.len()
+                ))
+                .await
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>();
+
+            self.beacon_nodes
+                .request(ApiTopic::SyncCommittee, |beacon_node| async move {
+                    beacon_node
+                        .post_beacon_pool_sync_committee_signatures(committee_signatures)
+                        .await
+                })
+                .instrument(info_span!(
+                    "publish_sync_signatures",
+                    count = committee_signatures.len()
+                ))
+                .await
+                .map_err(|e| {
+                    error!(
+                        %slot,
+                        error = %e,
+                        "Unable to publish sync committee messages"
+                    );
+                })?;
+
+            info!(
+                count = committee_signatures.len(),
+                head_block = ?beacon_block_root,
+                %slot,
+                "Successfully published sync committee messages"
+            );
         }
 
         Ok(())
@@ -395,60 +475,90 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> SyncCommitteeService<S
             })?
             .data;
 
-        // Build the batch of contributions to sign.
-        let contributions_to_sign: Vec<_> = subnet_aggregators
-            .into_iter()
-            .map(|(aggregator_index, aggregator_pk, selection_proof)| {
-                (
+        // Create futures to produce signed contributions.
+        let aggregator_count = subnet_aggregators.len();
+        let parallel_sign = self
+            .duties_service
+            .sync_duties
+            .selection_proof_config
+            .parallel_sign;
+
+        let signature_futures = subnet_aggregators.into_iter().map(
+            |(aggregator_index, aggregator_pk, selection_proof)| async move {
+                let signing_fut = self.validator_store.produce_signed_contribution_and_proof(
                     aggregator_index,
                     aggregator_pk,
                     contribution.clone(),
                     selection_proof,
-                )
-            })
-            .collect();
+                );
 
-        if contributions_to_sign.is_empty() {
-            return Ok(());
-        }
+                let result = if parallel_sign {
+                    match tokio::time::timeout(Duration::from_secs(4), signing_fut).await {
+                        Ok(result) => result,
+                        Err(_) => {
+                            warn!(
+                                aggregator_index,
+                                %slot,
+                                "Sync contribution signing timed out after 4s"
+                            );
+                            return None;
+                        }
+                    }
+                } else {
+                    signing_fut.await
+                };
 
-        // Sign contributions. Returns a channel that yields batches.
-        let mut rx = self
-            .validator_store
-            .sign_sync_committee_contributions(contributions_to_sign)
-            .await
-            .map_err(|e| {
-                crit!(%slot, error = ?e, "Failed to sign sync committee contributions");
-            })?;
+                match result {
+                    Ok(signed_contribution) => Some(signed_contribution),
+                    Err(ValidatorStoreError::UnknownPubkey(pubkey)) => {
+                        // A pubkey can be missing when a validator was recently
+                        // removed via the API.
+                        debug!(?pubkey, %slot, "Missing pubkey for sync contribution");
+                        None
+                    }
+                    Err(e) => {
+                        crit!(
+                            %slot,
+                            error = ?e,
+                            "Unable to sign sync committee contribution"
+                        );
+                        None
+                    }
+                }
+            },
+        );
 
-        if self
-            .duties_service
-            .sync_duties
-            .selection_proof_config
-            .parallel_sign
-        {
-            // Streaming path: publish each batch as it arrives.
-            while let Some(batch) = rx.recv().await {
-                if !batch.is_empty() {
-                    self.publish_sync_contribution_batch(
-                        &batch,
-                        slot,
-                        beacon_block_root,
-                        subnet_id,
-                        contribution.aggregation_bits.num_set_bits(),
-                    )
-                    .await?;
+        if parallel_sign {
+            // Streaming path: publish batches on a timer as signing completes,
+            // so fast SSV committees don't wait for slow ones.
+            let mut signing_stream: FuturesUnordered<_> = signature_futures.collect();
+            let mut batch = Vec::new();
+            let mut interval = tokio::time::interval(Duration::from_millis(50));
+            interval.tick().await; // consume the immediate first tick
+            loop {
+                tokio::select! {
+                    Some(result) = signing_stream.next() => {
+                        if let Some(signed) = result {
+                            batch.push(signed);
+                        }
+                    }
+                    _ = interval.tick(), if !batch.is_empty() => {
+                        self.publish_sync_contribution_batch(
+                            &batch,
+                            slot,
+                            beacon_block_root,
+                            subnet_id,
+                            contribution.aggregation_bits.num_set_bits(),
+                        )
+                        .await?;
+                        batch.clear();
+                    }
+                    else => break,
                 }
             }
-        } else {
-            // Collect-all path: identical to previous behavior.
-            let mut all_contributions = Vec::new();
-            while let Some(batch) = rx.recv().await {
-                all_contributions.extend(batch);
-            }
-            if !all_contributions.is_empty() {
+            if !batch.is_empty() {
                 self.publish_sync_contribution_batch(
-                    &all_contributions,
+                    &batch,
                     slot,
                     beacon_block_root,
                     subnet_id,
@@ -456,6 +566,45 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> SyncCommitteeService<S
                 )
                 .await?;
             }
+        } else {
+            // Collect-all path: identical to previous behavior.
+            let signed_contributions = &join_all(signature_futures)
+                .instrument(info_span!(
+                    "sign_sync_contributions",
+                    count = aggregator_count
+                ))
+                .await
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>();
+
+            // Publish to the beacon node.
+            self.beacon_nodes
+                .first_success(|beacon_node| async move {
+                    beacon_node
+                        .post_validator_contribution_and_proofs(signed_contributions)
+                        .await
+                })
+                .instrument(info_span!(
+                    "publish_sync_contributions",
+                    count = signed_contributions.len()
+                ))
+                .await
+                .map_err(|e| {
+                    error!(
+                        %slot,
+                        error = %e,
+                        "Unable to publish signed contributions and proofs"
+                    );
+                })?;
+
+            info!(
+                subnet = %subnet_id,
+                beacon_block_root = %beacon_block_root,
+                num_signers = contribution.aggregation_bits.num_set_bits(),
+                %slot,
+                "Successfully published sync contributions"
+            );
         }
 
         Ok(())

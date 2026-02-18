@@ -179,59 +179,6 @@ pub trait ValidatorStore: Send + Sync {
         selection_proof: SyncSelectionProof,
     ) -> impl Future<Output = Result<SignedContributionAndProof<Self::E>, Error<Self::Error>>> + Send;
 
-    /// Sign a batch of aggregate and proofs and return results via a channel.
-    ///
-    /// For standard operation, yields a single batch. For DVT, may yield multiple batches
-    /// (e.g., one per committee) for incremental publishing.
-    ///
-    /// Input: Vec of (validator_pubkey, aggregator_index, aggregate_attestation, selection_proof).
-    #[allow(clippy::type_complexity)]
-    fn sign_aggregate_and_proofs(
-        self: &Arc<Self>,
-        aggregates: Vec<(PublicKeyBytes, u64, Attestation<Self::E>, SelectionProof)>,
-    ) -> impl Future<
-        Output = Result<
-            mpsc::Receiver<Vec<SignedAggregateAndProof<Self::E>>>,
-            Error<Self::Error>,
-        >,
-    > + Send;
-
-    /// Sign a batch of sync committee messages and return results via a channel.
-    ///
-    /// For standard operation, yields a single batch. For DVT, may yield multiple batches
-    /// for incremental publishing.
-    ///
-    /// Input: Vec of (slot, beacon_block_root, validator_index, validator_pubkey).
-    #[allow(clippy::type_complexity)]
-    fn sign_sync_committee_signatures(
-        self: &Arc<Self>,
-        messages: Vec<(Slot, Hash256, u64, PublicKeyBytes)>,
-    ) -> impl Future<
-        Output = Result<mpsc::Receiver<Vec<SyncCommitteeMessage>>, Error<Self::Error>>,
-    > + Send;
-
-    /// Sign a batch of sync committee contributions and return results via a channel.
-    ///
-    /// For standard operation, yields a single batch. For DVT, may yield multiple batches
-    /// for incremental publishing.
-    ///
-    /// Input: Vec of (aggregator_index, aggregator_pubkey, contribution, selection_proof).
-    #[allow(clippy::type_complexity)]
-    fn sign_sync_committee_contributions(
-        self: &Arc<Self>,
-        contributions: Vec<(
-            u64,
-            PublicKeyBytes,
-            SyncCommitteeContribution<Self::E>,
-            SyncSelectionProof,
-        )>,
-    ) -> impl Future<
-        Output = Result<
-            mpsc::Receiver<Vec<SignedContributionAndProof<Self::E>>>,
-            Error<Self::Error>,
-        >,
-    > + Send;
-
     /// Prune the slashing protection database so that it remains performant.
     ///
     /// This function will only do actual pruning periodically, so it should usually be
