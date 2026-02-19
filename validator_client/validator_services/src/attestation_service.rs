@@ -575,22 +575,33 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> AttestationService<S, 
             return Ok(());
         }
 
-        let mut attestation_stream = self
+        let attestation_stream = self
             .validator_store
-            .sign_attestations(attestations_to_sign)
-            .await
-            .map_err(|e| format!("Failed to sign attestations: {e:?}"))?;
+            .sign_attestations(attestations_to_sign);
+        tokio::pin!(attestation_stream);
 
         let fork_name = self
             .chain_spec
             .fork_name_at_slot::<S::E>(attestation_data.slot);
 
         // Publish each batch as it arrives from the stream.
-        while let Some(batch) = attestation_stream.next().await {
-            if !batch.is_empty() {
-                self.publish_attestation_batch(&batch, fork_name, &attestation_data, slot)
-                    .await;
+        let mut published_any = false;
+        while let Some(result) = attestation_stream.next().await {
+            match result {
+                Ok(batch) if !batch.is_empty() => {
+                    published_any = true;
+                    self.publish_attestation_batch(&batch, fork_name, &attestation_data, slot)
+                        .await;
+                }
+                Err(e) => {
+                    return Err(format!("Failed to sign attestations: {e:?}"));
+                }
+                _ => {}
             }
+        }
+
+        if !published_any {
+            warn!("No attestations were published");
         }
 
         Ok(())
@@ -764,16 +775,21 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> AttestationService<S, 
         }
 
         // Sign aggregates. Returns a stream of batches.
-        let mut aggregate_stream = self
+        let aggregate_stream = self
             .validator_store
-            .sign_aggregate_and_proofs(aggregates_to_sign)
-            .await
-            .map_err(|e| format!("Failed to sign aggregates: {e:?}"))?;
+            .sign_aggregate_and_proofs(aggregates_to_sign);
+        tokio::pin!(aggregate_stream);
 
         // Publish each batch as it arrives from the stream.
-        while let Some(batch) = aggregate_stream.next().await {
-            if !batch.is_empty() {
-                self.publish_aggregate_batch(&batch, fork_name).await;
+        while let Some(result) = aggregate_stream.next().await {
+            match result {
+                Ok(batch) if !batch.is_empty() => {
+                    self.publish_aggregate_batch(&batch, fork_name).await;
+                }
+                Err(e) => {
+                    return Err(format!("Failed to sign aggregates: {e:?}"));
+                }
+                _ => {}
             }
         }
 

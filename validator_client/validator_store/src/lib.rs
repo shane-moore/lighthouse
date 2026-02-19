@@ -1,6 +1,6 @@
 use bls::{PublicKeyBytes, Signature};
 use eth2::types::{FullBlockContents, PublishBlockRequest};
-use futures::stream::BoxStream;
+use futures::Stream;
 use slashing_protection::NotSafe;
 use std::fmt::Debug;
 use std::future::Future;
@@ -125,12 +125,7 @@ pub trait ValidatorStore: Send + Sync {
     fn sign_attestations(
         self: &Arc<Self>,
         attestations: Vec<(u64, PublicKeyBytes, usize, Attestation<Self::E>)>,
-    ) -> impl Future<
-        Output = Result<
-            BoxStream<'static, Vec<(u64, Attestation<Self::E>)>>,
-            Error<Self::Error>,
-        >,
-    > + Send;
+    ) -> impl Stream<Item = Result<Vec<(u64, Attestation<Self::E>)>, Error<Self::Error>>> + Send;
 
     fn sign_validator_registration_data(
         &self,
@@ -189,12 +184,7 @@ pub trait ValidatorStore: Send + Sync {
     fn sign_aggregate_and_proofs(
         self: &Arc<Self>,
         aggregates: Vec<(PublicKeyBytes, u64, Attestation<Self::E>, SelectionProof)>,
-    ) -> impl Future<
-        Output = Result<
-            BoxStream<'static, Vec<SignedAggregateAndProof<Self::E>>>,
-            Error<Self::Error>,
-        >,
-    > + Send;
+    ) -> impl Stream<Item = Result<Vec<SignedAggregateAndProof<Self::E>>, Error<Self::Error>>> + Send;
 
     /// Sign a batch of sync committee messages and return results as a stream of batches.
     ///
@@ -204,9 +194,7 @@ pub trait ValidatorStore: Send + Sync {
     fn sign_sync_committee_signatures(
         self: &Arc<Self>,
         messages: Vec<(Slot, Hash256, u64, PublicKeyBytes)>,
-    ) -> impl Future<
-        Output = Result<BoxStream<'static, Vec<SyncCommitteeMessage>>, Error<Self::Error>>,
-    > + Send;
+    ) -> impl Stream<Item = Result<Vec<SyncCommitteeMessage>, Error<Self::Error>>> + Send;
 
     /// Sign a batch of sync committee contributions and return results as a stream of batches.
     ///
@@ -221,12 +209,7 @@ pub trait ValidatorStore: Send + Sync {
             SyncCommitteeContribution<Self::E>,
             SyncSelectionProof,
         )>,
-    ) -> impl Future<
-        Output = Result<
-            BoxStream<'static, Vec<SignedContributionAndProof<Self::E>>>,
-            Error<Self::Error>,
-        >,
-    > + Send;
+    ) -> impl Stream<Item = Result<Vec<SignedContributionAndProof<Self::E>>, Error<Self::Error>>> + Send;
 
     /// Prune the slashing protection database so that it remains performant.
     ///

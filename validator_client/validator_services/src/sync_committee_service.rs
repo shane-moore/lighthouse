@@ -256,18 +256,22 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> SyncCommitteeService<S
             return Ok(());
         }
 
-        let mut signature_stream = self
+        let signature_stream = self
             .validator_store
-            .sign_sync_committee_signatures(messages_to_sign)
-            .await
-            .map_err(|e| {
-                crit!(%slot, error = ?e, "Failed to sign sync committee signatures");
-            })?;
+            .sign_sync_committee_signatures(messages_to_sign);
+        tokio::pin!(signature_stream);
 
-        while let Some(batch) = signature_stream.next().await {
-            if !batch.is_empty() {
-                self.publish_sync_signature_batch(&batch, slot, beacon_block_root)
-                    .await?;
+        while let Some(result) = signature_stream.next().await {
+            match result {
+                Ok(batch) if !batch.is_empty() => {
+                    self.publish_sync_signature_batch(&batch, slot, beacon_block_root)
+                        .await?;
+                }
+                Err(e) => {
+                    crit!(%slot, error = ?e, "Failed to sign sync committee signatures");
+                    return Err(());
+                }
+                _ => {}
             }
         }
 
@@ -300,9 +304,9 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> SyncCommitteeService<S
             })?;
 
         info!(
-            count = committee_signatures.len(),
-            head_block = ?beacon_block_root,
             %slot,
+            beacon_block_root = %beacon_block_root,
+            count = committee_signatures.len(),
             "Successfully published sync committee messages"
         );
 
@@ -386,20 +390,24 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> SyncCommitteeService<S
             return Ok(());
         }
 
-        let mut contribution_stream = self
+        let contribution_stream = self
             .validator_store
-            .sign_sync_committee_contributions(contributions_to_sign)
-            .await
-            .map_err(|e| {
-                crit!(%slot, error = ?e, "Failed to sign sync committee contributions");
-            })?;
+            .sign_sync_committee_contributions(contributions_to_sign);
+        tokio::pin!(contribution_stream);
 
-        while let Some(batch) = contribution_stream.next().await {
-            if !batch.is_empty() {
-                self.publish_sync_contribution_batch(
-                    &batch, slot, beacon_block_root, subnet_id,
-                    contribution.aggregation_bits.num_set_bits(),
-                ).await?;
+        while let Some(result) = contribution_stream.next().await {
+            match result {
+                Ok(batch) if !batch.is_empty() => {
+                    self.publish_sync_contribution_batch(
+                        &batch, slot, beacon_block_root, subnet_id,
+                        contribution.aggregation_bits.num_set_bits(),
+                    ).await?;
+                }
+                Err(e) => {
+                    crit!(%slot, error = ?e, "Failed to sign sync committee contributions");
+                    return Err(());
+                }
+                _ => {}
             }
         }
 

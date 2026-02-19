@@ -3,7 +3,8 @@ use bls::{PublicKeyBytes, Signature};
 use doppelganger_service::DoppelgangerService;
 use eth2::types::PublishBlockRequest;
 use futures::future::join_all;
-use futures::stream::{self, BoxStream, StreamExt};
+use futures::Stream;
+use futures::stream;
 use initialized_validators::InitializedValidators;
 use logging::crit;
 use parking_lot::{Mutex, RwLock};
@@ -18,7 +19,7 @@ use std::marker::PhantomData;
 use std::path::Path;
 use std::sync::Arc;
 use task_executor::TaskExecutor;
-use tracing::{error, info, instrument, warn};
+use tracing::{Instrument, debug, error, info, info_span, instrument, warn};
 use types::{
     AbstractExecPayload, Address, AggregateAndProof, Attestation, BeaconBlock, BlindedPayload,
     ChainSpec, ContributionAndProof, Domain, Epoch, EthSpec, ExecutionPayloadEnvelope, Fork,
@@ -883,72 +884,78 @@ impl<T: SlotClock + 'static, E: EthSpec> ValidatorStore for LighthouseValidatorS
         }
     }
 
-    async fn sign_attestations(
+    fn sign_attestations(
         self: &Arc<Self>,
         mut attestations: Vec<(u64, PublicKeyBytes, usize, Attestation<Self::E>)>,
-    ) -> Result<BoxStream<'static, Vec<(u64, Attestation<E>)>>, Error> {
-        // Sign all attestations concurrently.
-        let signing_futures =
-            attestations
-                .iter_mut()
-                .map(|(_, pubkey, validator_committee_index, attestation)| {
-                    let pubkey = *pubkey;
-                    let validator_committee_index = *validator_committee_index;
-                    async move {
-                        self.sign_attestation_no_slashing_protection(
-                            pubkey,
-                            validator_committee_index,
-                            attestation,
-                        )
-                        .await
+    ) -> impl Stream<Item = Result<Vec<(u64, Attestation<E>)>, Error>> + Send {
+        let store = self.clone();
+        stream::once(async move {
+            // Sign all attestations concurrently.
+            let signing_futures =
+                attestations
+                    .iter_mut()
+                    .map(|(_, pubkey, validator_committee_index, attestation)| {
+                        let pubkey = *pubkey;
+                        let validator_committee_index = *validator_committee_index;
+                        let store = store.clone();
+                        async move {
+                            store.sign_attestation_no_slashing_protection(
+                                pubkey,
+                                validator_committee_index,
+                                attestation,
+                            )
+                            .await
+                        }
+                    });
+
+            // Execute all signing in parallel.
+            let results: Vec<_> = join_all(signing_futures).await;
+
+            // Collect successfully signed attestations and log errors.
+            let mut signed_attestations = Vec::with_capacity(attestations.len());
+            for (result, (validator_index, pubkey, _, attestation)) in
+                results.into_iter().zip(attestations.into_iter())
+            {
+                match result {
+                    Ok(()) => {
+                        signed_attestations.push((validator_index, attestation, pubkey));
                     }
-                });
-
-        // Execute all signing in parallel.
-        let results: Vec<_> = join_all(signing_futures).await;
-
-        // Collect successfully signed attestations and log errors.
-        let mut signed_attestations = Vec::with_capacity(attestations.len());
-        for (result, (validator_index, pubkey, _, attestation)) in
-            results.into_iter().zip(attestations.into_iter())
-        {
-            match result {
-                Ok(()) => {
-                    signed_attestations.push((validator_index, attestation, pubkey));
-                }
-                Err(ValidatorStoreError::UnknownPubkey(pubkey)) => {
-                    warn!(
-                        info = "a validator may have recently been removed from this VC",
-                        ?pubkey,
-                        "Missing pubkey for attestation"
-                    );
-                }
-                Err(e) => {
-                    crit!(
-                        error = ?e,
-                        "Failed to sign attestation"
-                    );
+                    Err(ValidatorStoreError::UnknownPubkey(pubkey)) => {
+                        warn!(
+                            info = "a validator may have recently been removed from this VC",
+                            ?pubkey,
+                            "Missing pubkey for attestation"
+                        );
+                    }
+                    Err(e) => {
+                        crit!(
+                            error = ?e,
+                            "Failed to sign attestation"
+                        );
+                    }
                 }
             }
-        }
 
-        if signed_attestations.is_empty() {
-            return Ok(stream::empty().boxed());
-        }
+            if signed_attestations.is_empty() {
+                return Ok(vec![]);
+            }
 
-        // Check slashing protection and insert into database. Use a dedicated blocking thread
-        // to avoid clogging the async executor with blocking database I/O.
-        let validator_store = self.clone();
-        let safe_attestations = self
-            .task_executor
-            .spawn_blocking_handle(
-                move || validator_store.slashing_protect_attestations(signed_attestations),
-                "slashing_protect_attestations",
-            )
-            .ok_or(Error::ExecutorError)?
-            .await
-            .map_err(|_| Error::ExecutorError)??;
-        Ok(stream::once(async move { safe_attestations }).boxed())
+            // Check slashing protection and insert into database. Use a dedicated blocking
+            // thread to avoid clogging the async executor with blocking database I/O.
+            let validator_store = store.clone();
+            let handle = store
+                .task_executor
+                .spawn_blocking_handle(
+                    move || validator_store.slashing_protect_attestations(signed_attestations),
+                    "slashing_protect_attestations",
+                )
+                .ok_or(Error::ExecutorError)?;
+
+            match handle.await {
+                Ok(result) => result,
+                Err(_) => Err(Error::ExecutorError),
+            }
+        })
     }
 
     async fn sign_validator_registration_data(
@@ -1167,112 +1174,154 @@ impl<T: SlotClock + 'static, E: EthSpec> ValidatorStore for LighthouseValidatorS
         Ok(SignedContributionAndProof { message, signature })
     }
 
-    async fn sign_aggregate_and_proofs(
+    fn sign_aggregate_and_proofs(
         self: &Arc<Self>,
         aggregates: Vec<(PublicKeyBytes, u64, Attestation<E>, SelectionProof)>,
-    ) -> Result<BoxStream<'static, Vec<SignedAggregateAndProof<E>>>, Error> {
-        let signing_futures = aggregates.into_iter().map(
-            |(pubkey, aggregator_index, aggregate, selection_proof)| async move {
-                match self
-                    .produce_signed_aggregate_and_proof(
-                        pubkey,
-                        aggregator_index,
-                        aggregate,
-                        selection_proof,
-                    )
-                    .await
-                {
-                    Ok(signed) => Some(signed),
-                    Err(ValidatorStoreError::UnknownPubkey(pubkey)) => {
-                        warn!(
-                            info = "a validator may have recently been removed from this VC",
-                            ?pubkey,
-                            "Missing pubkey for aggregate"
-                        );
-                        None
+    ) -> impl Stream<Item = Result<Vec<SignedAggregateAndProof<E>>, Error>> + Send {
+        let store = self.clone();
+        let count = aggregates.len();
+        stream::once(async move {
+            let signing_futures = aggregates.into_iter().map(
+                |(pubkey, aggregator_index, aggregate, selection_proof)| {
+                    let store = store.clone();
+                    async move {
+                        match store
+                            .produce_signed_aggregate_and_proof(
+                                pubkey,
+                                aggregator_index,
+                                aggregate,
+                                selection_proof,
+                            )
+                            .await
+                        {
+                            Ok(signed) => Some(signed),
+                            Err(ValidatorStoreError::UnknownPubkey(pubkey)) => {
+                                // A pubkey can be missing when a validator was recently
+                                // removed via the API.
+                                debug!(?pubkey, "Missing pubkey for aggregate");
+                                None
+                            }
+                            Err(e) => {
+                                crit!(error = ?e, ?pubkey, "Failed to sign aggregate");
+                                None
+                            }
+                        }
                     }
-                    Err(e) => {
-                        crit!(error = ?e, "Failed to sign aggregate");
-                        None
-                    }
-                }
-            },
-        );
+                },
+            );
 
-        let results: Vec<_> = join_all(signing_futures).await.into_iter().flatten().collect();
-        Ok(stream::once(async move { results }).boxed())
+            Ok(join_all(signing_futures)
+                .instrument(info_span!("sign_aggregates", count))
+                .await
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>())
+        })
     }
 
-    async fn sign_sync_committee_signatures(
+    fn sign_sync_committee_signatures(
         self: &Arc<Self>,
         messages: Vec<(Slot, Hash256, u64, PublicKeyBytes)>,
-    ) -> Result<BoxStream<'static, Vec<SyncCommitteeMessage>>, Error> {
-        let signing_futures = messages.into_iter().map(
-            |(slot, beacon_block_root, validator_index, pubkey)| async move {
-                match self
-                    .produce_sync_committee_signature(
-                        slot,
-                        beacon_block_root,
-                        validator_index,
-                        &pubkey,
-                    )
-                    .await
-                {
-                    Ok(sig) => Some(sig),
-                    Err(ValidatorStoreError::UnknownPubkey(pubkey)) => {
-                        warn!(
-                            info = "a validator may have recently been removed from this VC",
-                            ?pubkey,
-                            "Missing pubkey for sync committee signature"
-                        );
-                        None
+    ) -> impl Stream<Item = Result<Vec<SyncCommitteeMessage>, Error>> + Send {
+        let store = self.clone();
+        let count = messages.len();
+        stream::once(async move {
+            let signing_futures = messages.into_iter().map(
+                |(slot, beacon_block_root, validator_index, pubkey)| {
+                    let store = store.clone();
+                    async move {
+                        match store
+                            .produce_sync_committee_signature(
+                                slot,
+                                beacon_block_root,
+                                validator_index,
+                                &pubkey,
+                            )
+                            .await
+                        {
+                            Ok(sig) => Some(sig),
+                            Err(ValidatorStoreError::UnknownPubkey(pubkey)) => {
+                                // A pubkey can be missing when a validator was recently
+                                // removed via the API.
+                                debug!(
+                                    ?pubkey,
+                                    validator_index,
+                                    %slot,
+                                    "Missing pubkey for sync committee signature"
+                                );
+                                None
+                            }
+                            Err(e) => {
+                                crit!(
+                                    validator_index,
+                                    %slot,
+                                    error = ?e,
+                                    "Failed to sign sync committee signature"
+                                );
+                                None
+                            }
+                        }
                     }
-                    Err(e) => {
-                        crit!(error = ?e, "Failed to sign sync committee message");
-                        None
-                    }
-                }
-            },
-        );
+                },
+            );
 
-        let results: Vec<_> = join_all(signing_futures).await.into_iter().flatten().collect();
-        Ok(stream::once(async move { results }).boxed())
+            Ok(join_all(signing_futures)
+                .instrument(info_span!("sign_sync_signatures", count))
+                .await
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>())
+        })
     }
 
-    async fn sign_sync_committee_contributions(
+    fn sign_sync_committee_contributions(
         self: &Arc<Self>,
         contributions: Vec<(u64, PublicKeyBytes, SyncCommitteeContribution<E>, SyncSelectionProof)>,
-    ) -> Result<BoxStream<'static, Vec<SignedContributionAndProof<E>>>, Error> {
-        let signing_futures = contributions.into_iter().map(
-            |(aggregator_index, aggregator_pubkey, contribution, selection_proof)| async move {
-                match self
-                    .produce_signed_contribution_and_proof(
-                        aggregator_index,
-                        aggregator_pubkey,
-                        contribution,
-                        selection_proof,
-                    )
-                    .await
-                {
-                    Ok(signed) => Some(signed),
-                    Err(ValidatorStoreError::UnknownPubkey(pubkey)) => {
-                        warn!(
-                            info = "a validator may have recently been removed from this VC",
-                            ?pubkey,
-                            "Missing pubkey for sync contribution"
-                        );
-                        None
+    ) -> impl Stream<Item = Result<Vec<SignedContributionAndProof<E>>, Error>> + Send {
+        let store = self.clone();
+        let count = contributions.len();
+        stream::once(async move {
+            let signing_futures = contributions.into_iter().map(
+                |(aggregator_index, aggregator_pubkey, contribution, selection_proof)| {
+                    let store = store.clone();
+                    let slot = contribution.slot;
+                    async move {
+                        match store
+                            .produce_signed_contribution_and_proof(
+                                aggregator_index,
+                                aggregator_pubkey,
+                                contribution,
+                                selection_proof,
+                            )
+                            .await
+                        {
+                            Ok(signed) => Some(signed),
+                            Err(ValidatorStoreError::UnknownPubkey(pubkey)) => {
+                                // A pubkey can be missing when a validator was recently
+                                // removed via the API.
+                                debug!(?pubkey, %slot, "Missing pubkey for sync contribution");
+                                None
+                            }
+                            Err(e) => {
+                                crit!(
+                                    %slot,
+                                    error = ?e,
+                                    "Unable to sign sync committee contribution"
+                                );
+                                None
+                            }
+                        }
                     }
-                    Err(e) => {
-                        crit!(error = ?e, "Failed to sign sync committee contribution");
-                        None
-                    }
-                }
-            },
-        );
+                },
+            );
 
-        let results: Vec<_> = join_all(signing_futures).await.into_iter().flatten().collect();
-        Ok(stream::once(async move { results }).boxed())
+            Ok(join_all(signing_futures)
+                .instrument(info_span!("sign_sync_contributions", count))
+                .await
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>())
+        })
     }
 
     /// Prune the slashing protection database so that it remains performant.
