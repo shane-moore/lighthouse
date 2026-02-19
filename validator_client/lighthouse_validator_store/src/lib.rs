@@ -3,6 +3,7 @@ use bls::{PublicKeyBytes, Signature};
 use doppelganger_service::DoppelgangerService;
 use eth2::types::PublishBlockRequest;
 use futures::future::join_all;
+use futures::stream::{self, BoxStream, StreamExt};
 use initialized_validators::InitializedValidators;
 use logging::crit;
 use parking_lot::{Mutex, RwLock};
@@ -885,7 +886,7 @@ impl<T: SlotClock + 'static, E: EthSpec> ValidatorStore for LighthouseValidatorS
     async fn sign_attestations(
         self: &Arc<Self>,
         mut attestations: Vec<(u64, PublicKeyBytes, usize, Attestation<Self::E>)>,
-    ) -> Result<Vec<(u64, Attestation<E>)>, Error> {
+    ) -> Result<BoxStream<'static, Vec<(u64, Attestation<E>)>>, Error> {
         // Sign all attestations concurrently.
         let signing_futures =
             attestations
@@ -932,7 +933,7 @@ impl<T: SlotClock + 'static, E: EthSpec> ValidatorStore for LighthouseValidatorS
         }
 
         if signed_attestations.is_empty() {
-            return Ok(vec![]);
+            return Ok(stream::empty().boxed());
         }
 
         // Check slashing protection and insert into database. Use a dedicated blocking thread
@@ -947,7 +948,7 @@ impl<T: SlotClock + 'static, E: EthSpec> ValidatorStore for LighthouseValidatorS
             .ok_or(Error::ExecutorError)?
             .await
             .map_err(|_| Error::ExecutorError)??;
-        Ok(safe_attestations)
+        Ok(stream::once(async move { safe_attestations }).boxed())
     }
 
     async fn sign_validator_registration_data(
@@ -1164,6 +1165,114 @@ impl<T: SlotClock + 'static, E: EthSpec> ValidatorStore for LighthouseValidatorS
         );
 
         Ok(SignedContributionAndProof { message, signature })
+    }
+
+    async fn sign_aggregate_and_proofs(
+        self: &Arc<Self>,
+        aggregates: Vec<(PublicKeyBytes, u64, Attestation<E>, SelectionProof)>,
+    ) -> Result<BoxStream<'static, Vec<SignedAggregateAndProof<E>>>, Error> {
+        let signing_futures = aggregates.into_iter().map(
+            |(pubkey, aggregator_index, aggregate, selection_proof)| async move {
+                match self
+                    .produce_signed_aggregate_and_proof(
+                        pubkey,
+                        aggregator_index,
+                        aggregate,
+                        selection_proof,
+                    )
+                    .await
+                {
+                    Ok(signed) => Some(signed),
+                    Err(ValidatorStoreError::UnknownPubkey(pubkey)) => {
+                        warn!(
+                            info = "a validator may have recently been removed from this VC",
+                            ?pubkey,
+                            "Missing pubkey for aggregate"
+                        );
+                        None
+                    }
+                    Err(e) => {
+                        crit!(error = ?e, "Failed to sign aggregate");
+                        None
+                    }
+                }
+            },
+        );
+
+        let results: Vec<_> = join_all(signing_futures).await.into_iter().flatten().collect();
+        Ok(stream::once(async move { results }).boxed())
+    }
+
+    async fn sign_sync_committee_signatures(
+        self: &Arc<Self>,
+        messages: Vec<(Slot, Hash256, u64, PublicKeyBytes)>,
+    ) -> Result<BoxStream<'static, Vec<SyncCommitteeMessage>>, Error> {
+        let signing_futures = messages.into_iter().map(
+            |(slot, beacon_block_root, validator_index, pubkey)| async move {
+                match self
+                    .produce_sync_committee_signature(
+                        slot,
+                        beacon_block_root,
+                        validator_index,
+                        &pubkey,
+                    )
+                    .await
+                {
+                    Ok(sig) => Some(sig),
+                    Err(ValidatorStoreError::UnknownPubkey(pubkey)) => {
+                        warn!(
+                            info = "a validator may have recently been removed from this VC",
+                            ?pubkey,
+                            "Missing pubkey for sync committee signature"
+                        );
+                        None
+                    }
+                    Err(e) => {
+                        crit!(error = ?e, "Failed to sign sync committee message");
+                        None
+                    }
+                }
+            },
+        );
+
+        let results: Vec<_> = join_all(signing_futures).await.into_iter().flatten().collect();
+        Ok(stream::once(async move { results }).boxed())
+    }
+
+    async fn sign_sync_committee_contributions(
+        self: &Arc<Self>,
+        contributions: Vec<(u64, PublicKeyBytes, SyncCommitteeContribution<E>, SyncSelectionProof)>,
+    ) -> Result<BoxStream<'static, Vec<SignedContributionAndProof<E>>>, Error> {
+        let signing_futures = contributions.into_iter().map(
+            |(aggregator_index, aggregator_pubkey, contribution, selection_proof)| async move {
+                match self
+                    .produce_signed_contribution_and_proof(
+                        aggregator_index,
+                        aggregator_pubkey,
+                        contribution,
+                        selection_proof,
+                    )
+                    .await
+                {
+                    Ok(signed) => Some(signed),
+                    Err(ValidatorStoreError::UnknownPubkey(pubkey)) => {
+                        warn!(
+                            info = "a validator may have recently been removed from this VC",
+                            ?pubkey,
+                            "Missing pubkey for sync contribution"
+                        );
+                        None
+                    }
+                    Err(e) => {
+                        crit!(error = ?e, "Failed to sign sync committee contribution");
+                        None
+                    }
+                }
+            },
+        );
+
+        let results: Vec<_> = join_all(signing_futures).await.into_iter().flatten().collect();
+        Ok(stream::once(async move { results }).boxed())
     }
 
     /// Prune the slashing protection database so that it remains performant.

@@ -1,5 +1,6 @@
 use bls::{PublicKeyBytes, Signature};
 use eth2::types::{FullBlockContents, PublishBlockRequest};
+use futures::stream::BoxStream;
 use slashing_protection::NotSafe;
 use std::fmt::Debug;
 use std::future::Future;
@@ -106,22 +107,30 @@ pub trait ValidatorStore: Send + Sync {
 
     /// Sign a batch of `attestations` and apply slashing protection to them.
     ///
-    /// Only successfully signed attestations that pass slashing protection are returned, along with
-    /// the validator index of the signer. Eventually this will be replaced by `SingleAttestation`
-    /// use.
+    /// Returns a stream of batches of successfully signed attestations. Each batch contains
+    /// attestations that passed slashing protection, along with the validator index of the signer.
+    ///
+    /// For standard (non-distributed) operation, the stream yields a single batch containing
+    /// all attestations. For DVT/distributed operation, the stream may yield multiple batches
+    /// (e.g., one per committee) allowing incremental publishing as each committee completes.
     ///
     /// Input:
     ///
     /// * Vec of (validator_index, pubkey, validator_committee_index, attestation).
     ///
-    /// Output:
+    /// Output (per batch):
     ///
     /// * Vec of (validator_index, signed_attestation).
     #[allow(clippy::type_complexity)]
     fn sign_attestations(
         self: &Arc<Self>,
         attestations: Vec<(u64, PublicKeyBytes, usize, Attestation<Self::E>)>,
-    ) -> impl Future<Output = Result<Vec<(u64, Attestation<Self::E>)>, Error<Self::Error>>> + Send;
+    ) -> impl Future<
+        Output = Result<
+            BoxStream<'static, Vec<(u64, Attestation<Self::E>)>>,
+            Error<Self::Error>,
+        >,
+    > + Send;
 
     fn sign_validator_registration_data(
         &self,
@@ -171,6 +180,53 @@ pub trait ValidatorStore: Send + Sync {
         contribution: SyncCommitteeContribution<Self::E>,
         selection_proof: SyncSelectionProof,
     ) -> impl Future<Output = Result<SignedContributionAndProof<Self::E>, Error<Self::Error>>> + Send;
+
+    /// Sign a batch of aggregate and proofs and return results as a stream of batches.
+    ///
+    /// For standard operation, yields a single batch. For DVT, may yield multiple batches
+    /// (e.g., one per committee) for incremental publishing.
+    #[allow(clippy::type_complexity)]
+    fn sign_aggregate_and_proofs(
+        self: &Arc<Self>,
+        aggregates: Vec<(PublicKeyBytes, u64, Attestation<Self::E>, SelectionProof)>,
+    ) -> impl Future<
+        Output = Result<
+            BoxStream<'static, Vec<SignedAggregateAndProof<Self::E>>>,
+            Error<Self::Error>,
+        >,
+    > + Send;
+
+    /// Sign a batch of sync committee messages and return results as a stream of batches.
+    ///
+    /// For standard operation, yields a single batch. For DVT, may yield multiple batches
+    /// for incremental publishing.
+    #[allow(clippy::type_complexity)]
+    fn sign_sync_committee_signatures(
+        self: &Arc<Self>,
+        messages: Vec<(Slot, Hash256, u64, PublicKeyBytes)>,
+    ) -> impl Future<
+        Output = Result<BoxStream<'static, Vec<SyncCommitteeMessage>>, Error<Self::Error>>,
+    > + Send;
+
+    /// Sign a batch of sync committee contributions and return results as a stream of batches.
+    ///
+    /// For standard operation, yields a single batch. For DVT, may yield multiple batches
+    /// for incremental publishing.
+    #[allow(clippy::type_complexity)]
+    fn sign_sync_committee_contributions(
+        self: &Arc<Self>,
+        contributions: Vec<(
+            u64,
+            PublicKeyBytes,
+            SyncCommitteeContribution<Self::E>,
+            SyncSelectionProof,
+        )>,
+    ) -> impl Future<
+        Output = Result<
+            BoxStream<'static, Vec<SignedContributionAndProof<Self::E>>>,
+            Error<Self::Error>,
+        >,
+    > + Send;
 
     /// Prune the slashing protection database so that it remains performant.
     ///
