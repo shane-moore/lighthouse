@@ -14,8 +14,8 @@ use task_executor::TaskExecutor;
 use tokio::time::{Duration, Instant, sleep, sleep_until};
 use tracing::{Instrument, debug, error, info, info_span, instrument, trace, warn};
 use types::{
-    ChainSpec, EthSpec, Hash256, Slot, SyncCommitteeSubscription,
-    SyncContributionData, SyncDuty, SyncSelectionProof, SyncSubnetId,
+    ChainSpec, EthSpec, Hash256, Slot, SyncCommitteeSubscription, SyncContributionData, SyncDuty,
+    SyncSelectionProof, SyncSubnetId,
 };
 use validator_store::{ContributionToSign, SyncMessageToSign, ValidatorStore};
 

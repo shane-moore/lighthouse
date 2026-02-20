@@ -141,10 +141,12 @@ pub trait ValidatorStore: Send + Sync {
     ///
     /// Returns a stream of batches of successfully signed attestations. Each batch contains
     /// attestations that passed slashing protection, along with the validator index of the signer.
+    /// Eventually this will be replaced by `SingleAttestation` use.
     ///
-    /// For standard (non-distributed) operation, the stream yields a single batch containing
-    /// all attestations. For DVT/distributed operation, the stream may yield multiple batches
-    /// (e.g., one per committee) allowing incremental publishing as each committee completes.
+    /// Output:
+    ///
+    /// * Vec of (validator_index, signed_attestation).
+    ///
     #[allow(clippy::type_complexity)]
     fn sign_attestations(
         self: &Arc<Self>,
@@ -173,27 +175,18 @@ pub trait ValidatorStore: Send + Sync {
     ) -> impl Future<Output = Result<SyncSelectionProof, Error<Self::Error>>> + Send;
 
     /// Sign a batch of aggregate and proofs and return results as a stream of batches.
-    ///
-    /// For standard operation, yields a single batch. For DVT, may yield multiple batches
-    /// (e.g., one per committee) for incremental publishing.
     fn sign_aggregate_and_proofs(
         self: &Arc<Self>,
         aggregates: Vec<AggregateToSign<Self::E>>,
     ) -> impl Stream<Item = Result<Vec<SignedAggregateAndProof<Self::E>>, Error<Self::Error>>> + Send;
 
     /// Sign a batch of sync committee messages and return results as a stream of batches.
-    ///
-    /// For standard operation, yields a single batch. For DVT, may yield multiple batches
-    /// for incremental publishing.
     fn sign_sync_committee_signatures(
         self: &Arc<Self>,
         messages: Vec<SyncMessageToSign>,
     ) -> impl Stream<Item = Result<Vec<SyncCommitteeMessage>, Error<Self::Error>>> + Send;
 
     /// Sign a batch of sync committee contributions and return results as a stream of batches.
-    ///
-    /// For standard operation, yields a single batch. For DVT, may yield multiple batches
-    /// for incremental publishing.
     fn sign_sync_committee_contributions(
         self: &Arc<Self>,
         contributions: Vec<ContributionToSign<Self::E>>,

@@ -12,9 +12,7 @@ use tokio::sync::mpsc;
 use tokio::time::{Duration, Instant, sleep, sleep_until};
 use tracing::{Instrument, debug, error, info, info_span, instrument, warn};
 use tree_hash::TreeHash;
-use types::{
-    Attestation, AttestationData, ChainSpec, CommitteeIndex, EthSpec, Hash256, Slot,
-};
+use types::{Attestation, AttestationData, ChainSpec, CommitteeIndex, EthSpec, Hash256, Slot};
 use validator_store::{AggregateToSign, AttestationToSign, ValidatorStore};
 
 /// Builds an `AttestationService`.
@@ -592,7 +590,9 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> AttestationService<S, 
                     let single_attestations = batch
                         .iter()
                         .filter_map(|(attester_index, attestation)| {
-                            match attestation.to_single_attestation_with_attester_index(*attester_index) {
+                            match attestation
+                                .to_single_attestation_with_attester_index(*attester_index)
+                            {
                                 Ok(single_attestation) => Some(single_attestation),
                                 Err(e) => {
                                     // This shouldn't happen unless BN and VC are out of sync with
@@ -632,10 +632,7 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> AttestationService<S, 
                                 )
                                 .await
                         })
-                        .instrument(info_span!(
-                            "publish_attestations",
-                            count = published_count
-                        ))
+                        .instrument(info_span!("publish_attestations", count = published_count))
                         .await
                     {
                         Ok(()) => info!(
@@ -802,12 +799,10 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> AttestationService<S, 
                     {
                         Ok(()) => {
                             for signed_aggregate_and_proof in signed_aggregate_and_proofs {
-                                let attestation =
-                                    signed_aggregate_and_proof.message().aggregate();
+                                let attestation = signed_aggregate_and_proof.message().aggregate();
                                 info!(
-                                    aggregator = signed_aggregate_and_proof
-                                        .message()
-                                        .aggregator_index(),
+                                    aggregator =
+                                        signed_aggregate_and_proof.message().aggregator_index(),
                                     signatures = attestation.num_set_aggregation_bits(),
                                     head_block =
                                         format!("{:?}", attestation.data().beacon_block_root),
@@ -820,8 +815,7 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> AttestationService<S, 
                         }
                         Err(e) => {
                             for signed_aggregate_and_proof in signed_aggregate_and_proofs {
-                                let attestation =
-                                    &signed_aggregate_and_proof.message().aggregate();
+                                let attestation = &signed_aggregate_and_proof.message().aggregate();
                                 crit!(
                                     error = %e,
                                     aggregator = signed_aggregate_and_proof
