@@ -1185,37 +1185,38 @@ impl<T: SlotClock + 'static, E: EthSpec> ValidatorStore for LighthouseValidatorS
                 |(pubkey, aggregator_index, aggregate, selection_proof)| {
                     let store = store.clone();
                     async move {
-                        match store
+                        let result = store
                             .produce_signed_aggregate_and_proof(
                                 pubkey,
                                 aggregator_index,
                                 aggregate,
                                 selection_proof,
                             )
-                            .await
-                        {
-                            Ok(signed) => Some(signed),
-                            Err(ValidatorStoreError::UnknownPubkey(pubkey)) => {
-                                // A pubkey can be missing when a validator was recently
-                                // removed via the API.
-                                debug!(?pubkey, "Missing pubkey for aggregate");
-                                None
-                            }
-                            Err(e) => {
-                                crit!(error = ?e, ?pubkey, "Failed to sign aggregate");
-                                None
-                            }
-                        }
+                            .await;
+                        (pubkey, result)
                     }
                 },
             );
 
-            Ok(join_all(signing_futures)
+            let results = join_all(signing_futures)
                 .instrument(info_span!("sign_aggregates", count))
-                .await
-                .into_iter()
-                .flatten()
-                .collect::<Vec<_>>())
+                .await;
+
+            let mut signed = Vec::with_capacity(results.len());
+            for (pubkey, result) in results {
+                match result {
+                    Ok(agg) => signed.push(agg),
+                    Err(ValidatorStoreError::UnknownPubkey(pubkey)) => {
+                        // A pubkey can be missing when a validator was recently
+                        // removed via the API.
+                        debug!(?pubkey, "Missing pubkey for aggregate");
+                    }
+                    Err(e) => {
+                        crit!(error = ?e, pubkey = ?pubkey, "Failed to sign aggregate");
+                    }
+                }
+            }
+            Ok(signed)
         })
     }
 
@@ -1230,47 +1231,48 @@ impl<T: SlotClock + 'static, E: EthSpec> ValidatorStore for LighthouseValidatorS
                 |(slot, beacon_block_root, validator_index, pubkey)| {
                     let store = store.clone();
                     async move {
-                        match store
+                        let result = store
                             .produce_sync_committee_signature(
                                 slot,
                                 beacon_block_root,
                                 validator_index,
                                 &pubkey,
                             )
-                            .await
-                        {
-                            Ok(sig) => Some(sig),
-                            Err(ValidatorStoreError::UnknownPubkey(pubkey)) => {
-                                // A pubkey can be missing when a validator was recently
-                                // removed via the API.
-                                debug!(
-                                    ?pubkey,
-                                    validator_index,
-                                    %slot,
-                                    "Missing pubkey for sync committee signature"
-                                );
-                                None
-                            }
-                            Err(e) => {
-                                crit!(
-                                    validator_index,
-                                    %slot,
-                                    error = ?e,
-                                    "Failed to sign sync committee signature"
-                                );
-                                None
-                            }
-                        }
+                            .await;
+                        (pubkey, validator_index, slot, result)
                     }
                 },
             );
 
-            Ok(join_all(signing_futures)
+            let results = join_all(signing_futures)
                 .instrument(info_span!("sign_sync_signatures", count))
-                .await
-                .into_iter()
-                .flatten()
-                .collect::<Vec<_>>())
+                .await;
+
+            let mut signed = Vec::with_capacity(results.len());
+            for (_pubkey, validator_index, slot, result) in results {
+                match result {
+                    Ok(sig) => signed.push(sig),
+                    Err(ValidatorStoreError::UnknownPubkey(pubkey)) => {
+                        // A pubkey can be missing when a validator was recently
+                        // removed via the API.
+                        debug!(
+                            ?pubkey,
+                            validator_index,
+                            %slot,
+                            "Missing pubkey for sync committee signature"
+                        );
+                    }
+                    Err(e) => {
+                        crit!(
+                            validator_index,
+                            %slot,
+                            error = ?e,
+                            "Failed to sign sync committee signature"
+                        );
+                    }
+                }
+            }
+            Ok(signed)
         })
     }
 
@@ -1286,41 +1288,42 @@ impl<T: SlotClock + 'static, E: EthSpec> ValidatorStore for LighthouseValidatorS
                     let store = store.clone();
                     let slot = contribution.slot;
                     async move {
-                        match store
+                        let result = store
                             .produce_signed_contribution_and_proof(
                                 aggregator_index,
                                 aggregator_pubkey,
                                 contribution,
                                 selection_proof,
                             )
-                            .await
-                        {
-                            Ok(signed) => Some(signed),
-                            Err(ValidatorStoreError::UnknownPubkey(pubkey)) => {
-                                // A pubkey can be missing when a validator was recently
-                                // removed via the API.
-                                debug!(?pubkey, %slot, "Missing pubkey for sync contribution");
-                                None
-                            }
-                            Err(e) => {
-                                crit!(
-                                    %slot,
-                                    error = ?e,
-                                    "Unable to sign sync committee contribution"
-                                );
-                                None
-                            }
-                        }
+                            .await;
+                        (slot, result)
                     }
                 },
             );
 
-            Ok(join_all(signing_futures)
+            let results = join_all(signing_futures)
                 .instrument(info_span!("sign_sync_contributions", count))
-                .await
-                .into_iter()
-                .flatten()
-                .collect::<Vec<_>>())
+                .await;
+
+            let mut signed = Vec::with_capacity(results.len());
+            for (slot, result) in results {
+                match result {
+                    Ok(contribution) => signed.push(contribution),
+                    Err(ValidatorStoreError::UnknownPubkey(pubkey)) => {
+                        // A pubkey can be missing when a validator was recently
+                        // removed via the API.
+                        debug!(?pubkey, %slot, "Missing pubkey for sync contribution");
+                    }
+                    Err(e) => {
+                        crit!(
+                            %slot,
+                            error = ?e,
+                            "Unable to sign sync committee contribution"
+                        );
+                    }
+                }
+            }
+            Ok(signed)
         })
     }
 
