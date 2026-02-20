@@ -2,9 +2,7 @@ use account_utils::validator_definitions::{PasswordStorage, ValidatorDefinition}
 use bls::{PublicKeyBytes, Signature};
 use doppelganger_service::DoppelgangerService;
 use eth2::types::PublishBlockRequest;
-use futures::Stream;
-use futures::future::join_all;
-use futures::stream;
+use futures::{Stream, future::join_all, stream};
 use initialized_validators::InitializedValidators;
 use logging::crit;
 use parking_lot::{Mutex, RwLock};
@@ -1064,18 +1062,16 @@ impl<T: SlotClock + 'static, E: EthSpec> ValidatorStore for LighthouseValidatorS
             // Check slashing protection and insert into database. Use a dedicated blocking
             // thread to avoid clogging the async executor with blocking database I/O.
             let validator_store = store.clone();
-            let handle = store
+            let safe_attestations = store
                 .task_executor
                 .spawn_blocking_handle(
                     move || validator_store.slashing_protect_attestations(signed_attestations),
                     "slashing_protect_attestations",
                 )
-                .ok_or(Error::ExecutorError)?;
-
-            match handle.await {
-                Ok(result) => result,
-                Err(_) => Err(Error::ExecutorError),
-            }
+                .ok_or(Error::ExecutorError)?
+                .await
+                .map_err(|_| Error::ExecutorError)??;
+            Ok(safe_attestations)
         })
     }
 

@@ -13,7 +13,7 @@ use tokio::time::{Duration, Instant, sleep, sleep_until};
 use tracing::{Instrument, debug, error, info, info_span, instrument, warn};
 use tree_hash::TreeHash;
 use types::{
-    Attestation, AttestationData, ChainSpec, CommitteeIndex, EthSpec, ForkName, Hash256, Slot,
+    Attestation, AttestationData, ChainSpec, CommitteeIndex, EthSpec, Hash256, Slot,
 };
 use validator_store::{AggregateToSign, AttestationToSign, ValidatorStore};
 
@@ -588,8 +588,73 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> AttestationService<S, 
             match result {
                 Ok(batch) if !batch.is_empty() => {
                     published_any = true;
-                    self.publish_attestation_batch(&batch, fork_name, &attestation_data, slot)
-                        .await;
+
+                    let single_attestations = batch
+                        .iter()
+                        .filter_map(|(attester_index, attestation)| {
+                            match attestation.to_single_attestation_with_attester_index(*attester_index) {
+                                Ok(single_attestation) => Some(single_attestation),
+                                Err(e) => {
+                                    // This shouldn't happen unless BN and VC are out of sync with
+                                    // respect to the Electra fork.
+                                    error!(
+                                        error = ?e,
+                                        committee_index = attestation_data.index,
+                                        slot = slot.as_u64(),
+                                        "type" = "unaggregated",
+                                        "Unable to convert to SingleAttestation"
+                                    );
+                                    None
+                                }
+                            }
+                        })
+                        .collect::<Vec<_>>();
+                    let single_attestations = &single_attestations;
+                    let validator_indices = single_attestations
+                        .iter()
+                        .map(|att| att.attester_index)
+                        .collect::<Vec<_>>();
+                    let published_count = single_attestations.len();
+
+                    // Post the attestations to the BN.
+                    match self
+                        .beacon_nodes
+                        .request(ApiTopic::Attestations, |beacon_node| async move {
+                            let _timer = validator_metrics::start_timer_vec(
+                                &validator_metrics::ATTESTATION_SERVICE_TIMES,
+                                &[validator_metrics::ATTESTATIONS_HTTP_POST],
+                            );
+
+                            beacon_node
+                                .post_beacon_pool_attestations_v2::<S::E>(
+                                    single_attestations.clone(),
+                                    fork_name,
+                                )
+                                .await
+                        })
+                        .instrument(info_span!(
+                            "publish_attestations",
+                            count = published_count
+                        ))
+                        .await
+                    {
+                        Ok(()) => info!(
+                            count = published_count,
+                            validator_indices = ?validator_indices,
+                            head_block = ?attestation_data.beacon_block_root,
+                            committee_index = attestation_data.index,
+                            slot = attestation_data.slot.as_u64(),
+                            "type" = "unaggregated",
+                            "Successfully published attestations"
+                        ),
+                        Err(e) => error!(
+                            error = %e,
+                            committee_index = attestation_data.index,
+                            slot = slot.as_u64(),
+                            "type" = "unaggregated",
+                            "Unable to publish attestations"
+                        ),
+                    }
                 }
                 Err(e) => {
                     return Err(format!("Failed to sign attestations: {e:?}"));
@@ -603,78 +668,6 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> AttestationService<S, 
         }
 
         Ok(())
-    }
-
-    async fn publish_attestation_batch(
-        &self,
-        safe_attestations: &[(u64, Attestation<S::E>)],
-        fork_name: ForkName,
-        attestation_data: &AttestationData,
-        slot: Slot,
-    ) {
-        let single_attestations = safe_attestations
-            .iter()
-            .filter_map(|(i, a)| {
-                match a.to_single_attestation_with_attester_index(*i) {
-                    Ok(a) => Some(a),
-                    Err(e) => {
-                        // This shouldn't happen unless BN and VC are out of sync with
-                        // respect to the Electra fork.
-                        error!(
-                            error = ?e,
-                            committee_index = attestation_data.index,
-                            slot = slot.as_u64(),
-                            "type" = "unaggregated",
-                            "Unable to convert to SingleAttestation"
-                        );
-                        None
-                    }
-                }
-            })
-            .collect::<Vec<_>>();
-        let single_attestations = &single_attestations;
-        let validator_indices = single_attestations
-            .iter()
-            .map(|att| att.attester_index)
-            .collect::<Vec<_>>();
-        let published_count = single_attestations.len();
-
-        // Post the attestations to the BN.
-        match self
-            .beacon_nodes
-            .request(ApiTopic::Attestations, |beacon_node| async move {
-                let _timer = validator_metrics::start_timer_vec(
-                    &validator_metrics::ATTESTATION_SERVICE_TIMES,
-                    &[validator_metrics::ATTESTATIONS_HTTP_POST],
-                );
-
-                beacon_node
-                    .post_beacon_pool_attestations_v2::<S::E>(
-                        single_attestations.clone(),
-                        fork_name,
-                    )
-                    .await
-            })
-            .instrument(info_span!("publish_attestations", count = published_count))
-            .await
-        {
-            Ok(()) => info!(
-                count = published_count,
-                validator_indices = ?validator_indices,
-                head_block = ?attestation_data.beacon_block_root,
-                committee_index = attestation_data.index,
-                slot = attestation_data.slot.as_u64(),
-                "type" = "unaggregated",
-                "Successfully published attestations"
-            ),
-            Err(e) => error!(
-                error = %e,
-                committee_index = attestation_data.index,
-                slot = slot.as_u64(),
-                "type" = "unaggregated",
-                "Unable to publish attestations"
-            ),
-        }
     }
 
     /// Performs the second step of the attesting process: downloading an aggregated `Attestation`,
@@ -768,10 +761,6 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> AttestationService<S, 
             })
             .collect();
 
-        if aggregates_to_sign.is_empty() {
-            return Ok(());
-        }
-
         // Sign aggregates. Returns a stream of batches.
         let aggregate_stream = self
             .validator_store
@@ -782,7 +771,70 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> AttestationService<S, 
         while let Some(result) = aggregate_stream.next().await {
             match result {
                 Ok(batch) if !batch.is_empty() => {
-                    self.publish_aggregate_batch(&batch, fork_name).await;
+                    let signed_aggregate_and_proofs = batch.as_slice();
+                    match self
+                        .beacon_nodes
+                        .first_success(|beacon_node| async move {
+                            let _timer = validator_metrics::start_timer_vec(
+                                &validator_metrics::ATTESTATION_SERVICE_TIMES,
+                                &[validator_metrics::AGGREGATES_HTTP_POST],
+                            );
+                            if fork_name.electra_enabled() {
+                                beacon_node
+                                    .post_validator_aggregate_and_proof_v2(
+                                        signed_aggregate_and_proofs,
+                                        fork_name,
+                                    )
+                                    .await
+                            } else {
+                                beacon_node
+                                    .post_validator_aggregate_and_proof_v1(
+                                        signed_aggregate_and_proofs,
+                                    )
+                                    .await
+                            }
+                        })
+                        .instrument(info_span!(
+                            "publish_aggregates",
+                            count = signed_aggregate_and_proofs.len()
+                        ))
+                        .await
+                    {
+                        Ok(()) => {
+                            for signed_aggregate_and_proof in signed_aggregate_and_proofs {
+                                let attestation =
+                                    signed_aggregate_and_proof.message().aggregate();
+                                info!(
+                                    aggregator = signed_aggregate_and_proof
+                                        .message()
+                                        .aggregator_index(),
+                                    signatures = attestation.num_set_aggregation_bits(),
+                                    head_block =
+                                        format!("{:?}", attestation.data().beacon_block_root),
+                                    committee_index = attestation.committee_index(),
+                                    slot = attestation.data().slot.as_u64(),
+                                    "type" = "aggregated",
+                                    "Successfully published attestation"
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            for signed_aggregate_and_proof in signed_aggregate_and_proofs {
+                                let attestation =
+                                    &signed_aggregate_and_proof.message().aggregate();
+                                crit!(
+                                    error = %e,
+                                    aggregator = signed_aggregate_and_proof
+                                        .message()
+                                        .aggregator_index(),
+                                    committee_index = attestation.committee_index(),
+                                    slot = attestation.data().slot.as_u64(),
+                                    "type" = "aggregated",
+                                    "Failed to publish attestation"
+                                );
+                            }
+                        }
+                    }
                 }
                 Err(e) => {
                     return Err(format!("Failed to sign aggregates: {e:?}"));
@@ -792,67 +844,6 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> AttestationService<S, 
         }
 
         Ok(())
-    }
-
-    async fn publish_aggregate_batch(
-        &self,
-        signed_aggregate_and_proofs: &[types::SignedAggregateAndProof<S::E>],
-        fork_name: ForkName,
-    ) {
-        match self
-            .beacon_nodes
-            .first_success(|beacon_node| async move {
-                let _timer = validator_metrics::start_timer_vec(
-                    &validator_metrics::ATTESTATION_SERVICE_TIMES,
-                    &[validator_metrics::AGGREGATES_HTTP_POST],
-                );
-                if fork_name.electra_enabled() {
-                    beacon_node
-                        .post_validator_aggregate_and_proof_v2(
-                            signed_aggregate_and_proofs,
-                            fork_name,
-                        )
-                        .await
-                } else {
-                    beacon_node
-                        .post_validator_aggregate_and_proof_v1(signed_aggregate_and_proofs)
-                        .await
-                }
-            })
-            .instrument(info_span!(
-                "publish_aggregates",
-                count = signed_aggregate_and_proofs.len()
-            ))
-            .await
-        {
-            Ok(()) => {
-                for signed_aggregate_and_proof in signed_aggregate_and_proofs {
-                    let attestation = signed_aggregate_and_proof.message().aggregate();
-                    info!(
-                        aggregator = signed_aggregate_and_proof.message().aggregator_index(),
-                        signatures = attestation.num_set_aggregation_bits(),
-                        head_block = format!("{:?}", attestation.data().beacon_block_root),
-                        committee_index = attestation.committee_index(),
-                        slot = attestation.data().slot.as_u64(),
-                        "type" = "aggregated",
-                        "Successfully published attestation"
-                    );
-                }
-            }
-            Err(e) => {
-                for signed_aggregate_and_proof in signed_aggregate_and_proofs {
-                    let attestation = &signed_aggregate_and_proof.message().aggregate();
-                    crit!(
-                        error = %e,
-                        aggregator = signed_aggregate_and_proof.message().aggregator_index(),
-                        committee_index = attestation.committee_index(),
-                        slot = attestation.data().slot.as_u64(),
-                        "type" = "aggregated",
-                        "Failed to publish attestation"
-                    );
-                }
-            }
-        }
     }
 
     /// Spawn a blocking task to run the slashing protection pruning process.
