@@ -262,6 +262,7 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> SyncCommitteeService<S
             .sign_sync_committee_signatures(messages_to_sign);
         tokio::pin!(signature_stream);
 
+        let mut stream_error = false;
         while let Some(result) = signature_stream.next().await {
             match result {
                 Ok(committee_signatures) => {
@@ -294,9 +295,13 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> SyncCommitteeService<S
                 }
                 Err(e) => {
                     crit!(%slot, error = ?e, "Failed to sign sync committee signatures");
-                    return Err(());
+                    stream_error = true;
                 }
             }
+        }
+
+        if stream_error {
+            return Err(());
         }
 
         Ok(())
@@ -385,6 +390,7 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> SyncCommitteeService<S
             .sign_sync_committee_contributions(contributions_to_sign);
         tokio::pin!(contribution_stream);
 
+        let mut stream_error = false;
         while let Some(result) = contribution_stream.next().await {
             match result {
                 Ok(signed_contributions) => {
@@ -419,9 +425,13 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> SyncCommitteeService<S
                 }
                 Err(e) => {
                     crit!(%slot, error = ?e, "Failed to sign sync committee contributions");
-                    return Err(());
+                    stream_error = true;
                 }
             }
+        }
+
+        if stream_error {
+            return Err(());
         }
 
         Ok(())

@@ -582,6 +582,7 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> AttestationService<S, 
 
         // Publish each batch as it arrives from the stream.
         let mut published_any = false;
+        let mut stream_error = None;
         while let Some(result) = attestation_stream.next().await {
             match result {
                 Ok(batch) if !batch.is_empty() => {
@@ -654,10 +655,15 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> AttestationService<S, 
                     }
                 }
                 Err(e) => {
-                    return Err(format!("Failed to sign attestations: {e:?}"));
+                    crit!(error = ?e, "Failed to sign attestations");
+                    stream_error = Some(format!("Failed to sign attestations: {e:?}"));
                 }
                 _ => {}
             }
+        }
+
+        if let Some(e) = stream_error {
+            return Err(e);
         }
 
         if !published_any {
@@ -765,6 +771,7 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> AttestationService<S, 
         tokio::pin!(aggregate_stream);
 
         // Publish each batch as it arrives from the stream.
+        let mut stream_error = None;
         while let Some(result) = aggregate_stream.next().await {
             match result {
                 Ok(batch) if !batch.is_empty() => {
@@ -831,10 +838,15 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> AttestationService<S, 
                     }
                 }
                 Err(e) => {
-                    return Err(format!("Failed to sign aggregates: {e:?}"));
+                    crit!(error = ?e, "Failed to sign aggregates");
+                    stream_error = Some(format!("Failed to sign aggregates: {e:?}"));
                 }
                 _ => {}
             }
+        }
+
+        if let Some(e) = stream_error {
+            return Err(e);
         }
 
         Ok(())
