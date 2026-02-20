@@ -693,6 +693,119 @@ impl<T: SlotClock + 'static, E: EthSpec> LighthouseValidatorStore<T, E> {
 
         Ok(safe_attestations)
     }
+
+    /// Signs an `AggregateAndProof` for a given validator.
+    ///
+    /// The resulting `SignedAggregateAndProof` is sent on the aggregation channel and cannot be
+    /// modified by actors other than the signing validator.
+    async fn produce_signed_aggregate_and_proof(
+        &self,
+        validator_pubkey: PublicKeyBytes,
+        aggregator_index: u64,
+        aggregate: Attestation<E>,
+        selection_proof: SelectionProof,
+    ) -> Result<SignedAggregateAndProof<E>, Error> {
+        let signing_epoch = aggregate.data().target.epoch;
+        let signing_context = self.signing_context(Domain::AggregateAndProof, signing_epoch);
+
+        let message =
+            AggregateAndProof::from_attestation(aggregator_index, aggregate, selection_proof);
+
+        let signing_method = self.doppelganger_checked_signing_method(validator_pubkey)?;
+        let signature = signing_method
+            .get_signature::<E, BlindedPayload<E>>(
+                SignableMessage::SignedAggregateAndProof(message.to_ref()),
+                signing_context,
+                &self.spec,
+                &self.task_executor,
+            )
+            .await?;
+
+        validator_metrics::inc_counter_vec(
+            &validator_metrics::SIGNED_AGGREGATES_TOTAL,
+            &[validator_metrics::SUCCESS],
+        );
+
+        Ok(SignedAggregateAndProof::from_aggregate_and_proof(
+            message, signature,
+        ))
+    }
+
+    async fn produce_sync_committee_signature(
+        &self,
+        slot: Slot,
+        beacon_block_root: Hash256,
+        validator_index: u64,
+        validator_pubkey: &PublicKeyBytes,
+    ) -> Result<SyncCommitteeMessage, Error> {
+        let signing_epoch = slot.epoch(E::slots_per_epoch());
+        let signing_context = self.signing_context(Domain::SyncCommittee, signing_epoch);
+
+        // Bypass `with_validator_signing_method`: sync committee messages are not slashable.
+        let signing_method = self.doppelganger_bypassed_signing_method(*validator_pubkey)?;
+
+        let signature = signing_method
+            .get_signature::<E, BlindedPayload<E>>(
+                SignableMessage::SyncCommitteeSignature {
+                    beacon_block_root,
+                    slot,
+                },
+                signing_context,
+                &self.spec,
+                &self.task_executor,
+            )
+            .await
+            .map_err(Error::SpecificError)?;
+
+        validator_metrics::inc_counter_vec(
+            &validator_metrics::SIGNED_SYNC_COMMITTEE_MESSAGES_TOTAL,
+            &[validator_metrics::SUCCESS],
+        );
+
+        Ok(SyncCommitteeMessage {
+            slot,
+            beacon_block_root,
+            validator_index,
+            signature,
+        })
+    }
+
+    async fn produce_signed_contribution_and_proof(
+        &self,
+        aggregator_index: u64,
+        aggregator_pubkey: PublicKeyBytes,
+        contribution: SyncCommitteeContribution<E>,
+        selection_proof: SyncSelectionProof,
+    ) -> Result<SignedContributionAndProof<E>, Error> {
+        let signing_epoch = contribution.slot.epoch(E::slots_per_epoch());
+        let signing_context = self.signing_context(Domain::ContributionAndProof, signing_epoch);
+
+        // Bypass `with_validator_signing_method`: sync committee messages are not slashable.
+        let signing_method = self.doppelganger_bypassed_signing_method(aggregator_pubkey)?;
+
+        let message = ContributionAndProof {
+            aggregator_index,
+            contribution,
+            selection_proof: selection_proof.into(),
+        };
+
+        let signature = signing_method
+            .get_signature::<E, BlindedPayload<E>>(
+                SignableMessage::SignedContributionAndProof(&message),
+                signing_context,
+                &self.spec,
+                &self.task_executor,
+            )
+            .await
+            .map_err(Error::SpecificError)?;
+
+        validator_metrics::inc_counter_vec(
+            &validator_metrics::SIGNED_SYNC_COMMITTEE_CONTRIBUTIONS_TOTAL,
+            &[validator_metrics::SUCCESS],
+        );
+
+        Ok(SignedContributionAndProof { message, signature })
+    }
 }
 
 impl<T: SlotClock + 'static, E: EthSpec> ValidatorStore for LighthouseValidatorStore<T, E> {
@@ -987,43 +1100,6 @@ impl<T: SlotClock + 'static, E: EthSpec> ValidatorStore for LighthouseValidatorS
         })
     }
 
-    /// Signs an `AggregateAndProof` for a given validator.
-    ///
-    /// The resulting `SignedAggregateAndProof` is sent on the aggregation channel and cannot be
-    /// modified by actors other than the signing validator.
-    async fn produce_signed_aggregate_and_proof(
-        &self,
-        validator_pubkey: PublicKeyBytes,
-        aggregator_index: u64,
-        aggregate: Attestation<E>,
-        selection_proof: SelectionProof,
-    ) -> Result<SignedAggregateAndProof<E>, Error> {
-        let signing_epoch = aggregate.data().target.epoch;
-        let signing_context = self.signing_context(Domain::AggregateAndProof, signing_epoch);
-
-        let message =
-            AggregateAndProof::from_attestation(aggregator_index, aggregate, selection_proof);
-
-        let signing_method = self.doppelganger_checked_signing_method(validator_pubkey)?;
-        let signature = signing_method
-            .get_signature::<E, BlindedPayload<E>>(
-                SignableMessage::SignedAggregateAndProof(message.to_ref()),
-                signing_context,
-                &self.spec,
-                &self.task_executor,
-            )
-            .await?;
-
-        validator_metrics::inc_counter_vec(
-            &validator_metrics::SIGNED_AGGREGATES_TOTAL,
-            &[validator_metrics::SUCCESS],
-        );
-
-        Ok(SignedAggregateAndProof::from_aggregate_and_proof(
-            message, signature,
-        ))
-    }
-
     /// Produces a `SelectionProof` for the `slot`, signed by with corresponding secret key to
     /// `validator_pubkey`.
     async fn produce_selection_proof(
@@ -1096,82 +1172,6 @@ impl<T: SlotClock + 'static, E: EthSpec> ValidatorStore for LighthouseValidatorS
             .map_err(Error::SpecificError)?;
 
         Ok(signature.into())
-    }
-
-    async fn produce_sync_committee_signature(
-        &self,
-        slot: Slot,
-        beacon_block_root: Hash256,
-        validator_index: u64,
-        validator_pubkey: &PublicKeyBytes,
-    ) -> Result<SyncCommitteeMessage, Error> {
-        let signing_epoch = slot.epoch(E::slots_per_epoch());
-        let signing_context = self.signing_context(Domain::SyncCommittee, signing_epoch);
-
-        // Bypass `with_validator_signing_method`: sync committee messages are not slashable.
-        let signing_method = self.doppelganger_bypassed_signing_method(*validator_pubkey)?;
-
-        let signature = signing_method
-            .get_signature::<E, BlindedPayload<E>>(
-                SignableMessage::SyncCommitteeSignature {
-                    beacon_block_root,
-                    slot,
-                },
-                signing_context,
-                &self.spec,
-                &self.task_executor,
-            )
-            .await
-            .map_err(Error::SpecificError)?;
-
-        validator_metrics::inc_counter_vec(
-            &validator_metrics::SIGNED_SYNC_COMMITTEE_MESSAGES_TOTAL,
-            &[validator_metrics::SUCCESS],
-        );
-
-        Ok(SyncCommitteeMessage {
-            slot,
-            beacon_block_root,
-            validator_index,
-            signature,
-        })
-    }
-
-    async fn produce_signed_contribution_and_proof(
-        &self,
-        aggregator_index: u64,
-        aggregator_pubkey: PublicKeyBytes,
-        contribution: SyncCommitteeContribution<E>,
-        selection_proof: SyncSelectionProof,
-    ) -> Result<SignedContributionAndProof<E>, Error> {
-        let signing_epoch = contribution.slot.epoch(E::slots_per_epoch());
-        let signing_context = self.signing_context(Domain::ContributionAndProof, signing_epoch);
-
-        // Bypass `with_validator_signing_method`: sync committee messages are not slashable.
-        let signing_method = self.doppelganger_bypassed_signing_method(aggregator_pubkey)?;
-
-        let message = ContributionAndProof {
-            aggregator_index,
-            contribution,
-            selection_proof: selection_proof.into(),
-        };
-
-        let signature = signing_method
-            .get_signature::<E, BlindedPayload<E>>(
-                SignableMessage::SignedContributionAndProof(&message),
-                signing_context,
-                &self.spec,
-                &self.task_executor,
-            )
-            .await
-            .map_err(Error::SpecificError)?;
-
-        validator_metrics::inc_counter_vec(
-            &validator_metrics::SIGNED_SYNC_COMMITTEE_CONTRIBUTIONS_TOTAL,
-            &[validator_metrics::SUCCESS],
-        );
-
-        Ok(SignedContributionAndProof { message, signature })
     }
 
     fn sign_aggregate_and_proofs(

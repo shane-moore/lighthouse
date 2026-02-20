@@ -132,18 +132,6 @@ pub trait ValidatorStore: Send + Sync {
         validator_registration_data: ValidatorRegistrationData,
     ) -> impl Future<Output = Result<SignedValidatorRegistrationData, Error<Self::Error>>> + Send;
 
-    /// Signs an `AggregateAndProof` for a given validator.
-    ///
-    /// The resulting `SignedAggregateAndProof` is sent on the aggregation channel and cannot be
-    /// modified by actors other than the signing validator.
-    fn produce_signed_aggregate_and_proof(
-        &self,
-        validator_pubkey: PublicKeyBytes,
-        aggregator_index: u64,
-        aggregate: Attestation<Self::E>,
-        selection_proof: SelectionProof,
-    ) -> impl Future<Output = Result<SignedAggregateAndProof<Self::E>, Error<Self::Error>>> + Send;
-
     /// Produces a `SelectionProof` for the `slot`, signed by with corresponding secret key to
     /// `validator_pubkey`.
     fn produce_selection_proof(
@@ -159,22 +147,6 @@ pub trait ValidatorStore: Send + Sync {
         slot: Slot,
         subnet_id: SyncSubnetId,
     ) -> impl Future<Output = Result<SyncSelectionProof, Error<Self::Error>>> + Send;
-
-    fn produce_sync_committee_signature(
-        &self,
-        slot: Slot,
-        beacon_block_root: Hash256,
-        validator_index: u64,
-        validator_pubkey: &PublicKeyBytes,
-    ) -> impl Future<Output = Result<SyncCommitteeMessage, Error<Self::Error>>> + Send;
-
-    fn produce_signed_contribution_and_proof(
-        &self,
-        aggregator_index: u64,
-        aggregator_pubkey: PublicKeyBytes,
-        contribution: SyncCommitteeContribution<Self::E>,
-        selection_proof: SyncSelectionProof,
-    ) -> impl Future<Output = Result<SignedContributionAndProof<Self::E>, Error<Self::Error>>> + Send;
 
     /// Sign a batch of aggregate and proofs and return results as a stream of batches.
     ///
