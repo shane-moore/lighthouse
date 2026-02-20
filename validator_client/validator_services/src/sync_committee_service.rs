@@ -381,7 +381,12 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> SyncCommitteeService<S
         let contributions_to_sign: Vec<_> = subnet_aggregators
             .into_iter()
             .map(|(aggregator_index, aggregator_pk, selection_proof)| {
-                (aggregator_index, aggregator_pk, contribution.clone(), selection_proof)
+                (
+                    aggregator_index,
+                    aggregator_pk,
+                    contribution.clone(),
+                    selection_proof,
+                )
             })
             .collect();
 
@@ -398,9 +403,13 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> SyncCommitteeService<S
             match result {
                 Ok(batch) => {
                     self.publish_sync_contribution_batch(
-                        &batch, slot, beacon_block_root, subnet_id,
+                        &batch,
+                        slot,
+                        beacon_block_root,
+                        subnet_id,
                         contribution.aggregation_bits.num_set_bits(),
-                    ).await?;
+                    )
+                    .await?;
                 }
                 Err(e) => {
                     crit!(%slot, error = ?e, "Failed to sign sync committee contributions");

@@ -2,8 +2,8 @@ use account_utils::validator_definitions::{PasswordStorage, ValidatorDefinition}
 use bls::{PublicKeyBytes, Signature};
 use doppelganger_service::DoppelgangerService;
 use eth2::types::PublishBlockRequest;
-use futures::future::join_all;
 use futures::Stream;
+use futures::future::join_all;
 use futures::stream;
 use initialized_validators::InitializedValidators;
 use logging::crit;
@@ -698,7 +698,7 @@ impl<T: SlotClock + 'static, E: EthSpec> LighthouseValidatorStore<T, E> {
     ///
     /// The resulting `SignedAggregateAndProof` is sent on the aggregation channel and cannot be
     /// modified by actors other than the signing validator.
-    async fn produce_signed_aggregate_and_proof(
+    pub async fn produce_signed_aggregate_and_proof(
         &self,
         validator_pubkey: PublicKeyBytes,
         aggregator_index: u64,
@@ -731,7 +731,7 @@ impl<T: SlotClock + 'static, E: EthSpec> LighthouseValidatorStore<T, E> {
         ))
     }
 
-    async fn produce_sync_committee_signature(
+    pub async fn produce_sync_committee_signature(
         &self,
         slot: Slot,
         beacon_block_root: Hash256,
@@ -770,7 +770,7 @@ impl<T: SlotClock + 'static, E: EthSpec> LighthouseValidatorStore<T, E> {
         })
     }
 
-    async fn produce_signed_contribution_and_proof(
+    pub async fn produce_signed_contribution_and_proof(
         &self,
         aggregator_index: u64,
         aggregator_pubkey: PublicKeyBytes,
@@ -1004,22 +1004,22 @@ impl<T: SlotClock + 'static, E: EthSpec> ValidatorStore for LighthouseValidatorS
         let store = self.clone();
         stream::once(async move {
             // Sign all attestations concurrently.
-            let signing_futures =
-                attestations
-                    .iter_mut()
-                    .map(|(_, pubkey, validator_committee_index, attestation)| {
-                        let pubkey = *pubkey;
-                        let validator_committee_index = *validator_committee_index;
-                        let store = store.clone();
-                        async move {
-                            store.sign_attestation_no_slashing_protection(
+            let signing_futures = attestations.iter_mut().map(
+                |(_, pubkey, validator_committee_index, attestation)| {
+                    let pubkey = *pubkey;
+                    let validator_committee_index = *validator_committee_index;
+                    let store = store.clone();
+                    async move {
+                        store
+                            .sign_attestation_no_slashing_protection(
                                 pubkey,
                                 validator_committee_index,
                                 attestation,
                             )
                             .await
-                        }
-                    });
+                    }
+                },
+            );
 
             // Execute all signing in parallel.
             let results: Vec<_> = join_all(signing_futures).await;
@@ -1227,22 +1227,23 @@ impl<T: SlotClock + 'static, E: EthSpec> ValidatorStore for LighthouseValidatorS
         let store = self.clone();
         let count = messages.len();
         stream::once(async move {
-            let signing_futures = messages.into_iter().map(
-                |(slot, beacon_block_root, validator_index, pubkey)| {
-                    let store = store.clone();
-                    async move {
-                        let result = store
-                            .produce_sync_committee_signature(
-                                slot,
-                                beacon_block_root,
-                                validator_index,
-                                &pubkey,
-                            )
-                            .await;
-                        (pubkey, validator_index, slot, result)
-                    }
-                },
-            );
+            let signing_futures =
+                messages
+                    .into_iter()
+                    .map(|(slot, beacon_block_root, validator_index, pubkey)| {
+                        let store = store.clone();
+                        async move {
+                            let result = store
+                                .produce_sync_committee_signature(
+                                    slot,
+                                    beacon_block_root,
+                                    validator_index,
+                                    &pubkey,
+                                )
+                                .await;
+                            (pubkey, validator_index, slot, result)
+                        }
+                    });
 
             let results = join_all(signing_futures)
                 .instrument(info_span!("sign_sync_signatures", count))
@@ -1278,7 +1279,12 @@ impl<T: SlotClock + 'static, E: EthSpec> ValidatorStore for LighthouseValidatorS
 
     fn sign_sync_committee_contributions(
         self: &Arc<Self>,
-        contributions: Vec<(u64, PublicKeyBytes, SyncCommitteeContribution<E>, SyncSelectionProof)>,
+        contributions: Vec<(
+            u64,
+            PublicKeyBytes,
+            SyncCommitteeContribution<E>,
+            SyncSelectionProof,
+        )>,
     ) -> impl Stream<Item = Result<Vec<SignedContributionAndProof<E>>, Error>> + Send {
         let store = self.clone();
         let count = contributions.len();

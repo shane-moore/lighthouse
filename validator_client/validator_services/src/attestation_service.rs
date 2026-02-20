@@ -575,9 +575,7 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> AttestationService<S, 
             return Ok(());
         }
 
-        let attestation_stream = self
-            .validator_store
-            .sign_attestations(attestations_to_sign);
+        let attestation_stream = self.validator_store.sign_attestations(attestations_to_sign);
         tokio::pin!(attestation_stream);
 
         let fork_name = self
@@ -817,9 +815,7 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> AttestationService<S, 
                         .await
                 } else {
                     beacon_node
-                        .post_validator_aggregate_and_proof_v1(
-                            signed_aggregate_and_proofs,
-                        )
+                        .post_validator_aggregate_and_proof_v1(signed_aggregate_and_proofs)
                         .await
                 }
             })
