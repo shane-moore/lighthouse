@@ -20,6 +20,7 @@ use std::{collections::HashMap, path::Path};
 use tokio::runtime::Handle;
 use typenum::Unsigned;
 use types::{Address, attestation::AttestationBase};
+use validator_store::AttestationToSign;
 use validator_store::ValidatorStore;
 use zeroize::Zeroizing;
 
@@ -1102,12 +1103,14 @@ async fn generic_migration_test(
         // Sign attestations on VC1.
         for (validator_index, attestation) in first_vc_attestations {
             let public_key = keystore_pubkey(&keystores[validator_index]);
-            let stream = tester1.validator_store.sign_attestations(vec![(
-                0,
-                public_key,
-                0,
-                attestation.clone(),
-            )]);
+            let stream = tester1
+                .validator_store
+                .sign_attestations(vec![AttestationToSign {
+                    validator_index: 0,
+                    pubkey: public_key,
+                    validator_committee_index: 0,
+                    attestation: attestation.clone(),
+                }]);
             tokio::pin!(stream);
             let safe_attestations = stream.next().await.unwrap().unwrap();
             assert_eq!(safe_attestations.len(), 1);
@@ -1188,12 +1191,14 @@ async fn generic_migration_test(
         // Sign attestations on the second VC.
         for (validator_index, attestation, should_succeed) in second_vc_attestations {
             let public_key = keystore_pubkey(&keystores[validator_index]);
-            let stream = tester2.validator_store.sign_attestations(vec![(
-                0,
-                public_key,
-                0,
-                attestation.clone(),
-            )]);
+            let stream = tester2
+                .validator_store
+                .sign_attestations(vec![AttestationToSign {
+                    validator_index: 0,
+                    pubkey: public_key,
+                    validator_committee_index: 0,
+                    attestation: attestation.clone(),
+                }]);
             tokio::pin!(stream);
             let result = stream.next().await.unwrap();
             match result {
@@ -1339,12 +1344,12 @@ async fn delete_concurrent_with_signing() {
             for j in 0..num_attestations {
                 let att = make_attestation(j, j + 1);
                 for (validator_index, public_key) in thread_pubkeys.iter().enumerate() {
-                    let stream = validator_store.sign_attestations(vec![(
-                        validator_index as u64,
-                        *public_key,
-                        0,
-                        att.clone(),
-                    )]);
+                    let stream = validator_store.sign_attestations(vec![AttestationToSign {
+                        validator_index: validator_index as u64,
+                        pubkey: *public_key,
+                        validator_committee_index: 0,
+                        attestation: att.clone(),
+                    }]);
                     tokio::pin!(stream);
                     let _ = stream.next().await;
                 }

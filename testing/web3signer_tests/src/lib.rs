@@ -51,7 +51,7 @@ mod tests {
     use types::{attestation::AttestationBase, *};
     use url::Url;
     use validator_store::{
-        Error as ValidatorStoreError, SignedBlock, UnsignedBlock, ValidatorStore,
+        AttestationToSign, Error as ValidatorStoreError, SignedBlock, UnsignedBlock, ValidatorStore,
     };
 
     /// If the we are unable to reach the Web3Signer HTTP API within this time out then we will
@@ -655,7 +655,12 @@ mod tests {
         .await
         .assert_signatures_match("attestation", |pubkey, validator_store| async move {
             let attestation = get_attestation();
-            let stream = validator_store.sign_attestations(vec![(0, pubkey, 0, attestation)]);
+            let stream = validator_store.sign_attestations(vec![AttestationToSign {
+                validator_index: 0,
+                pubkey,
+                validator_committee_index: 0,
+                attestation,
+            }]);
             tokio::pin!(stream);
             stream.next().await.unwrap().unwrap().pop().unwrap().1
         })
@@ -876,7 +881,12 @@ mod tests {
         .await
         .assert_signatures_match("first_attestation", |pubkey, validator_store| async move {
             let attestation = first_attestation();
-            let stream = validator_store.sign_attestations(vec![(0, pubkey, 0, attestation)]);
+            let stream = validator_store.sign_attestations(vec![AttestationToSign {
+                validator_index: 0,
+                pubkey,
+                validator_committee_index: 0,
+                attestation,
+            }]);
             tokio::pin!(stream);
             stream.next().await.unwrap().unwrap().pop().unwrap().1
         })
@@ -885,7 +895,12 @@ mod tests {
             "double_vote_attestation",
             move |pubkey, validator_store| async move {
                 let attestation = double_vote_attestation();
-                let stream = validator_store.sign_attestations(vec![(0, pubkey, 0, attestation)]);
+                let stream = validator_store.sign_attestations(vec![AttestationToSign {
+                    validator_index: 0,
+                    pubkey,
+                    validator_committee_index: 0,
+                    attestation,
+                }]);
                 tokio::pin!(stream);
                 stream.next().await.unwrap()
             },
@@ -896,7 +911,12 @@ mod tests {
             "surrounding_attestation",
             move |pubkey, validator_store| async move {
                 let attestation = surrounding_attestation();
-                let stream = validator_store.sign_attestations(vec![(0, pubkey, 0, attestation)]);
+                let stream = validator_store.sign_attestations(vec![AttestationToSign {
+                    validator_index: 0,
+                    pubkey,
+                    validator_committee_index: 0,
+                    attestation,
+                }]);
                 tokio::pin!(stream);
                 stream.next().await.unwrap()
             },
@@ -907,7 +927,12 @@ mod tests {
             "surrounded_attestation",
             move |pubkey, validator_store| async move {
                 let attestation = surrounded_attestation();
-                let stream = validator_store.sign_attestations(vec![(0, pubkey, 0, attestation)]);
+                let stream = validator_store.sign_attestations(vec![AttestationToSign {
+                    validator_index: 0,
+                    pubkey,
+                    validator_committee_index: 0,
+                    attestation,
+                }]);
                 tokio::pin!(stream);
                 stream.next().await.unwrap()
             },

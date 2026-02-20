@@ -15,7 +15,7 @@ use tree_hash::TreeHash;
 use types::{
     Attestation, AttestationData, ChainSpec, CommitteeIndex, EthSpec, ForkName, Hash256, Slot,
 };
-use validator_store::ValidatorStore;
+use validator_store::{AggregateToSign, AttestationToSign, ValidatorStore};
 
 /// Builds an `AttestationService`.
 #[derive(Default)]
@@ -562,12 +562,12 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> AttestationService<S, 
                 }
             };
 
-            attestations_to_sign.push((
-                duty.validator_index,
-                duty.pubkey,
-                duty.validator_committee_index as usize,
+            attestations_to_sign.push(AttestationToSign {
+                validator_index: duty.validator_index,
+                pubkey: duty.pubkey,
+                validator_committee_index: duty.validator_committee_index as usize,
                 attestation,
-            ));
+            });
         }
 
         if attestations_to_sign.is_empty() {
@@ -759,12 +759,12 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> AttestationService<S, 
                     return None;
                 }
 
-                Some((
-                    duty.pubkey,
-                    duty.validator_index,
-                    aggregated_attestation.clone(),
-                    selection_proof.clone(),
-                ))
+                Some(AggregateToSign {
+                    pubkey: duty.pubkey,
+                    aggregator_index: duty.validator_index,
+                    aggregate: aggregated_attestation.clone(),
+                    selection_proof: selection_proof.clone(),
+                })
             })
             .collect();
 

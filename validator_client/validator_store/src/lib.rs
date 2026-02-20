@@ -33,6 +33,38 @@ impl<T> From<T> for Error<T> {
     }
 }
 
+/// Input for batch attestation signing
+pub struct AttestationToSign<E: EthSpec> {
+    pub validator_index: u64,
+    pub pubkey: PublicKeyBytes,
+    pub validator_committee_index: usize,
+    pub attestation: Attestation<E>,
+}
+
+/// Input for batch aggregate signing
+pub struct AggregateToSign<E: EthSpec> {
+    pub pubkey: PublicKeyBytes,
+    pub aggregator_index: u64,
+    pub aggregate: Attestation<E>,
+    pub selection_proof: SelectionProof,
+}
+
+/// Input for batch sync committee message signing
+pub struct SyncMessageToSign {
+    pub slot: Slot,
+    pub beacon_block_root: Hash256,
+    pub validator_index: u64,
+    pub pubkey: PublicKeyBytes,
+}
+
+/// Input for batch sync committee contribution signing
+pub struct ContributionToSign<E: EthSpec> {
+    pub aggregator_index: u64,
+    pub aggregator_pubkey: PublicKeyBytes,
+    pub contribution: SyncCommitteeContribution<E>,
+    pub selection_proof: SyncSelectionProof,
+}
+
 /// A helper struct, used for passing data from the validator store to services.
 pub struct ProposalData {
     pub validator_index: Option<u64>,
@@ -113,18 +145,10 @@ pub trait ValidatorStore: Send + Sync {
     /// For standard (non-distributed) operation, the stream yields a single batch containing
     /// all attestations. For DVT/distributed operation, the stream may yield multiple batches
     /// (e.g., one per committee) allowing incremental publishing as each committee completes.
-    ///
-    /// Input:
-    ///
-    /// * Vec of (validator_index, pubkey, validator_committee_index, attestation).
-    ///
-    /// Output (per batch):
-    ///
-    /// * Vec of (validator_index, signed_attestation).
     #[allow(clippy::type_complexity)]
     fn sign_attestations(
         self: &Arc<Self>,
-        attestations: Vec<(u64, PublicKeyBytes, usize, Attestation<Self::E>)>,
+        attestations: Vec<AttestationToSign<Self::E>>,
     ) -> impl Stream<Item = Result<Vec<(u64, Attestation<Self::E>)>, Error<Self::Error>>> + Send;
 
     fn sign_validator_registration_data(
@@ -152,35 +176,27 @@ pub trait ValidatorStore: Send + Sync {
     ///
     /// For standard operation, yields a single batch. For DVT, may yield multiple batches
     /// (e.g., one per committee) for incremental publishing.
-    #[allow(clippy::type_complexity)]
     fn sign_aggregate_and_proofs(
         self: &Arc<Self>,
-        aggregates: Vec<(PublicKeyBytes, u64, Attestation<Self::E>, SelectionProof)>,
+        aggregates: Vec<AggregateToSign<Self::E>>,
     ) -> impl Stream<Item = Result<Vec<SignedAggregateAndProof<Self::E>>, Error<Self::Error>>> + Send;
 
     /// Sign a batch of sync committee messages and return results as a stream of batches.
     ///
     /// For standard operation, yields a single batch. For DVT, may yield multiple batches
     /// for incremental publishing.
-    #[allow(clippy::type_complexity)]
     fn sign_sync_committee_signatures(
         self: &Arc<Self>,
-        messages: Vec<(Slot, Hash256, u64, PublicKeyBytes)>,
+        messages: Vec<SyncMessageToSign>,
     ) -> impl Stream<Item = Result<Vec<SyncCommitteeMessage>, Error<Self::Error>>> + Send;
 
     /// Sign a batch of sync committee contributions and return results as a stream of batches.
     ///
     /// For standard operation, yields a single batch. For DVT, may yield multiple batches
     /// for incremental publishing.
-    #[allow(clippy::type_complexity)]
     fn sign_sync_committee_contributions(
         self: &Arc<Self>,
-        contributions: Vec<(
-            u64,
-            PublicKeyBytes,
-            SyncCommitteeContribution<Self::E>,
-            SyncSelectionProof,
-        )>,
+        contributions: Vec<ContributionToSign<Self::E>>,
     ) -> impl Stream<Item = Result<Vec<SignedContributionAndProof<Self::E>>, Error<Self::Error>>> + Send;
 
     /// Prune the slashing protection database so that it remains performant.

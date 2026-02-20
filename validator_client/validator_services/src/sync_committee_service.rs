@@ -17,7 +17,7 @@ use types::{
     ChainSpec, EthSpec, Hash256, Slot, SyncCommitteeMessage, SyncCommitteeSubscription,
     SyncContributionData, SyncDuty, SyncSelectionProof, SyncSubnetId,
 };
-use validator_store::ValidatorStore;
+use validator_store::{ContributionToSign, SyncMessageToSign, ValidatorStore};
 
 pub const SUBSCRIPTION_LOOKAHEAD_EPOCHS: u64 = 4;
 
@@ -249,7 +249,12 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> SyncCommitteeService<S
     ) -> Result<(), ()> {
         let messages_to_sign: Vec<_> = validator_duties
             .iter()
-            .map(|duty| (slot, beacon_block_root, duty.validator_index, duty.pubkey))
+            .map(|duty| SyncMessageToSign {
+                slot,
+                beacon_block_root,
+                validator_index: duty.validator_index,
+                pubkey: duty.pubkey,
+            })
             .collect();
 
         if messages_to_sign.is_empty() {
@@ -380,14 +385,14 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> SyncCommitteeService<S
 
         let contributions_to_sign: Vec<_> = subnet_aggregators
             .into_iter()
-            .map(|(aggregator_index, aggregator_pk, selection_proof)| {
-                (
+            .map(
+                |(aggregator_index, aggregator_pk, selection_proof)| ContributionToSign {
                     aggregator_index,
-                    aggregator_pk,
-                    contribution.clone(),
+                    aggregator_pubkey: aggregator_pk,
+                    contribution: contribution.clone(),
                     selection_proof,
-                )
-            })
+                },
+            )
             .collect();
 
         if contributions_to_sign.is_empty() {
