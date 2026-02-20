@@ -263,7 +263,7 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> SyncCommitteeService<S
 
         while let Some(result) = signature_stream.next().await {
             match result {
-                Ok(batch) if !batch.is_empty() => {
+                Ok(batch) => {
                     self.publish_sync_signature_batch(&batch, slot, beacon_block_root)
                         .await?;
                 }
@@ -271,7 +271,6 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> SyncCommitteeService<S
                     crit!(%slot, error = ?e, "Failed to sign sync committee signatures");
                     return Err(());
                 }
-                _ => {}
             }
         }
 
@@ -304,9 +303,9 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> SyncCommitteeService<S
             })?;
 
         info!(
-            %slot,
-            beacon_block_root = %beacon_block_root,
             count = committee_signatures.len(),
+            head_block = ?beacon_block_root,
+            %slot,
             "Successfully published sync committee messages"
         );
 
@@ -397,7 +396,7 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> SyncCommitteeService<S
 
         while let Some(result) = contribution_stream.next().await {
             match result {
-                Ok(batch) if !batch.is_empty() => {
+                Ok(batch) => {
                     self.publish_sync_contribution_batch(
                         &batch, slot, beacon_block_root, subnet_id,
                         contribution.aggregation_bits.num_set_bits(),
@@ -407,7 +406,6 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> SyncCommitteeService<S
                     crit!(%slot, error = ?e, "Failed to sign sync committee contributions");
                     return Err(());
                 }
-                _ => {}
             }
         }
 
