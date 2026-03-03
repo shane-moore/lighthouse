@@ -146,7 +146,6 @@ pub trait ValidatorStore: Send + Sync {
     /// Output:
     ///
     /// * Vec of (validator_index, signed_attestation).
-    ///
     #[allow(clippy::type_complexity)]
     fn sign_attestations(
         self: &Arc<Self>,

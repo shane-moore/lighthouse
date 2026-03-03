@@ -264,9 +264,10 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> SyncCommitteeService<S
 
         while let Some(result) = signature_stream.next().await {
             match result {
-                Ok(committee_signatures) => {
+                Ok(committee_signatures) if !committee_signatures.is_empty() => {
                     let committee_signatures = &committee_signatures;
-                    self.beacon_nodes
+                    match self
+                        .beacon_nodes
                         .request(ApiTopic::SyncCommittee, |beacon_node| async move {
                             beacon_node
                                 .post_beacon_pool_sync_committee_signatures(committee_signatures)
@@ -277,24 +278,24 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> SyncCommitteeService<S
                             count = committee_signatures.len()
                         ))
                         .await
-                        .map_err(|e| {
-                            error!(
-                                %slot,
-                                error = %e,
-                                "Unable to publish sync committee messages"
-                            );
-                        })?;
-
-                    info!(
-                        count = committee_signatures.len(),
-                        head_block = ?beacon_block_root,
-                        %slot,
-                        "Successfully published sync committee messages"
-                    );
+                    {
+                        Ok(()) => info!(
+                            count = committee_signatures.len(),
+                            head_block = ?beacon_block_root,
+                            %slot,
+                            "Successfully published sync committee messages"
+                        ),
+                        Err(e) => error!(
+                            %slot,
+                            error = %e,
+                            "Unable to publish sync committee messages"
+                        ),
+                    }
                 }
                 Err(e) => {
                     crit!(%slot, error = ?e, "Failed to sign sync committee signatures");
                 }
+                _ => {}
             }
         }
 
@@ -386,10 +387,11 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> SyncCommitteeService<S
 
         while let Some(result) = contribution_stream.next().await {
             match result {
-                Ok(signed_contributions) => {
+                Ok(signed_contributions) if !signed_contributions.is_empty() => {
                     let signed_contributions = &signed_contributions;
                     // Publish to the beacon node.
-                    self.beacon_nodes
+                    match self
+                        .beacon_nodes
                         .first_success(|beacon_node| async move {
                             beacon_node
                                 .post_validator_contribution_and_proofs(signed_contributions)
@@ -400,25 +402,25 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> SyncCommitteeService<S
                             count = signed_contributions.len()
                         ))
                         .await
-                        .map_err(|e| {
-                            error!(
-                                %slot,
-                                error = %e,
-                                "Unable to publish signed contributions and proofs"
-                            );
-                        })?;
-
-                    info!(
-                        subnet = %subnet_id,
-                        beacon_block_root = %beacon_block_root,
-                        num_signers = contribution.aggregation_bits.num_set_bits(),
-                        %slot,
-                        "Successfully published sync contributions"
-                    );
+                    {
+                        Ok(()) => info!(
+                            subnet = %subnet_id,
+                            beacon_block_root = %beacon_block_root,
+                            num_signers = contribution.aggregation_bits.num_set_bits(),
+                            %slot,
+                            "Successfully published sync contributions"
+                        ),
+                        Err(e) => error!(
+                            %slot,
+                            error = %e,
+                            "Unable to publish signed contributions and proofs"
+                        ),
+                    }
                 }
                 Err(e) => {
                     crit!(%slot, error = ?e, "Failed to sign sync committee contributions");
                 }
+                _ => {}
             }
         }
 
