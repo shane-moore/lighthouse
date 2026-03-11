@@ -581,11 +581,11 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> AttestationService<S, 
             .fork_name_at_slot::<S::E>(attestation_data.slot);
 
         // Publish each batch as it arrives from the stream.
-        let mut published_any = false;
+        let mut received_non_empty_batch = false;
         while let Some(result) = attestation_stream.next().await {
             match result {
                 Ok(batch) if !batch.is_empty() => {
-                    published_any = true;
+                    received_non_empty_batch = true;
 
                     let single_attestations = batch
                         .iter()
@@ -660,7 +660,7 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> AttestationService<S, 
             }
         }
 
-        if !published_any {
+        if !received_non_empty_batch {
             warn!("No attestations were published");
         }
 
