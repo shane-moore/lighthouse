@@ -285,7 +285,7 @@ type DependentRoot = Hash256;
 
 type AttesterMap = HashMap<PublicKeyBytes, HashMap<Epoch, (DependentRoot, DutyAndProof)>>;
 type ProposerMap = HashMap<Epoch, (DependentRoot, Vec<ProposerData>)>;
-type PtcMap = HashMap<Epoch, (DependentRoot, HashMap<PublicKeyBytes, PtcDuty>)>;
+type PtcMap = HashMap<Epoch, (DependentRoot, Vec<PtcDuty>)>;
 
 pub struct DutiesServiceBuilder<S, T> {
     /// Provides the canonical list of locally-managed validators.
@@ -489,8 +489,8 @@ impl<S: ValidatorStore, T: SlotClock + 'static> DutiesService<S, T> {
             .get(&epoch)
             .map(|(_, duties)| {
                 duties
-                    .keys()
-                    .filter(|pubkey| signing_pubkeys.contains(pubkey))
+                    .iter()
+                    .filter(|ptc_duty| signing_pubkeys.contains(&ptc_duty.pubkey))
                     .count()
             })
             .unwrap_or(0)
@@ -568,10 +568,10 @@ impl<S: ValidatorStore, T: SlotClock + 'static> DutiesService<S, T> {
         self.ptc_duties
             .read()
             .get(&epoch)
-            .map(|(_, duties)| {
-                duties
-                    .values()
-                    .filter(|duty| duty.slot == slot)
+            .map(|(_, ptc_duties)| {
+                ptc_duties
+                    .iter()
+                    .filter(|ptc_duty| ptc_duty.slot == slot)
                     .cloned()
                     .collect()
             })
@@ -1937,11 +1937,6 @@ async fn poll_beacon_ptc_attesters_for_epoch<
     // Update duties - we only reach here if dependent_root changed or epoch is missing
     let mut ptc_duties = duties_service.ptc_duties.write();
 
-    let duties_by_pubkey: HashMap<PublicKeyBytes, PtcDuty> = new_duties
-        .into_iter()
-        .map(|duty| (duty.pubkey, duty))
-        .collect();
-
     match ptc_duties.entry(epoch) {
         hash_map::Entry::Occupied(mut entry) => {
             // Dependent root must have changed, so we do complete replacement.
@@ -1957,11 +1952,11 @@ async fn poll_beacon_ptc_attesters_for_epoch<
                 "PTC dependent root changed, replacing all duties"
             );
 
-            *entry.get_mut() = (dependent_root, duties_by_pubkey);
+            *entry.get_mut() = (dependent_root, new_duties);
         }
         hash_map::Entry::Vacant(entry) => {
             // No existing duties for this epoch
-            entry.insert((dependent_root, duties_by_pubkey));
+            entry.insert((dependent_root, new_duties));
         }
     }
 
