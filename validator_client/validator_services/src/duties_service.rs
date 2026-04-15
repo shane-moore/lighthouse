@@ -576,8 +576,7 @@ impl<S: ValidatorStore, T: SlotClock + 'static> DutiesService<S, T> {
                 ptc_duties
                     .iter()
                     .filter(|ptc_duty| {
-                        ptc_duty.slot == slot
-                            && signing_pubkeys.contains(&ptc_duty.pubkey)
+                        ptc_duty.slot == slot && signing_pubkeys.contains(&ptc_duty.pubkey)
                     })
                     .cloned()
                     .collect()
