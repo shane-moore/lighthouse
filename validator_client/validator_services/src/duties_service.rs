@@ -565,13 +565,20 @@ impl<S: ValidatorStore, T: SlotClock + 'static> DutiesService<S, T> {
     pub fn get_ptc_duties_for_slot(&self, slot: Slot) -> Vec<PtcDuty> {
         let epoch = slot.epoch(S::E::slots_per_epoch());
 
+        let signing_pubkeys: HashSet<_> = self
+            .validator_store
+            .voting_pubkeys(DoppelgangerStatus::only_safe);
+
         self.ptc_duties
             .read()
             .get(&epoch)
             .map(|(_, ptc_duties)| {
                 ptc_duties
                     .iter()
-                    .filter(|ptc_duty| ptc_duty.slot == slot)
+                    .filter(|ptc_duty| {
+                        ptc_duty.slot == slot
+                            && signing_pubkeys.contains(&ptc_duty.pubkey)
+                    })
                     .cloned()
                     .collect()
             })
@@ -726,7 +733,7 @@ pub fn start_update_service<S: ValidatorStore + 'static, T: SlotClock + 'static>
                         break;
                     };
 
-                    if current_epoch < gloas_fork_epoch {
+                    if current_epoch + 1 < gloas_fork_epoch {
                         // Wait until the next slot and check again
                         if let Some(duration) = duties_service.slot_clock.duration_to_next_slot() {
                             sleep(duration).await;
@@ -1865,10 +1872,9 @@ async fn poll_beacon_ptc_attesters_for_epoch<
         &[validator_metrics::UPDATE_PTC_FETCH],
     );
 
-    // Make a small initial request to check the dependent_root and determine if we need to fetch
-    // all duties. We use the `dependent_root` in the response to determine whether validator
-    // duties need to be updated. This is to ensure that we don't request for extra data unless
-    // necessary in order to save on network bandwidth.
+    // TODO(gloas) Unlike attester duties which use `get_uninitialized_validators` to detect
+    // newly-added validators, PTC duties only check dependent_root changes. Validators added
+    // mid-epoch won't get PTC duties until the next epoch boundary. We should probably fix this.
     let initial_indices_to_request =
         &local_indices[0..min(INITIAL_PTC_DUTIES_QUERY_SIZE, local_indices.len())];
 
