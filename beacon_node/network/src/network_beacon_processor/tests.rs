@@ -8,7 +8,7 @@ use crate::{
     service::NetworkMessage,
     sync::{SyncMessage, manager::BlockProcessType},
 };
-use beacon_chain::block_verification_types::RpcBlock;
+use beacon_chain::block_verification_types::LookupBlock;
 use beacon_chain::custody_context::NodeCustodyType;
 use beacon_chain::data_column_verification::validate_data_column_sidecar_for_gossip_fulu;
 use beacon_chain::kzg_utils::blobs_to_data_column_sidecars;
@@ -19,11 +19,14 @@ use beacon_chain::test_utils::{
 };
 use beacon_chain::{BeaconChain, WhenSlotSkipped};
 use beacon_processor::{work_reprocessing_queue::*, *};
+use bls::Signature;
+use fixed_bytes::FixedBytesExtended;
 use itertools::Itertools;
 use libp2p::gossipsub::MessageAcceptance;
 use lighthouse_network::rpc::InboundRequestId;
 use lighthouse_network::rpc::methods::{
     BlobsByRangeRequest, BlobsByRootRequest, DataColumnsByRangeRequest, MetaDataV3,
+    PayloadEnvelopesByRangeRequest, PayloadEnvelopesByRootRequest,
 };
 use lighthouse_network::{
     Client, MessageId, NetworkConfig, NetworkGlobals, PeerId, Response,
@@ -41,8 +44,9 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use types::{
     AttesterSlashing, BlobSidecar, ChainSpec, DataColumnSidecarList, DataColumnSubnetId, Epoch,
-    EthSpec, Hash256, MainnetEthSpec, ProposerSlashing, SignedAggregateAndProof, SignedBeaconBlock,
-    SignedVoluntaryExit, SingleAttestation, Slot, SubnetId,
+    EthSpec, ExecutionPayloadEnvelope, ExecutionPayloadGloas, ExecutionRequests, Hash256,
+    MainnetEthSpec, ProposerSlashing, SignedAggregateAndProof, SignedBeaconBlock,
+    SignedExecutionPayloadEnvelope, SignedVoluntaryExit, SingleAttestation, Slot, SubnetId,
 };
 use types::{
     BlobSidecarList,
@@ -120,6 +124,39 @@ impl TestRig {
         .await
     }
 
+    pub async fn new_with_skip_slots(chain_length: u64, skip_slots: &HashSet<u64>) -> Self {
+        let mut spec = test_spec::<E>();
+        spec.shard_committee_period = 2;
+        let spec = Arc::new(spec);
+        let beacon_processor_config = BeaconProcessorConfig::default();
+        let harness = BeaconChainHarness::builder(MainnetEthSpec)
+            .spec(spec.clone())
+            .deterministic_keypairs(VALIDATOR_COUNT)
+            .fresh_ephemeral_store()
+            .mock_execution_layer()
+            .node_custody_type(NodeCustodyType::Fullnode)
+            .chain_config(<_>::default())
+            .build();
+
+        harness.advance_slot();
+
+        for slot in 1..=chain_length {
+            if !skip_slots.contains(&slot) {
+                harness
+                    .extend_chain(
+                        1,
+                        BlockStrategy::OnCanonicalHead,
+                        AttestationStrategy::AllValidators,
+                    )
+                    .await;
+            }
+
+            harness.advance_slot();
+        }
+
+        Self::from_harness(harness, beacon_processor_config, spec).await
+    }
+
     pub async fn new_parametric(
         chain_length: u64,
         beacon_processor_config: BeaconProcessorConfig,
@@ -150,6 +187,14 @@ impl TestRig {
             harness.advance_slot();
         }
 
+        Self::from_harness(harness, beacon_processor_config, spec).await
+    }
+
+    async fn from_harness(
+        harness: BeaconChainHarness<T>,
+        beacon_processor_config: BeaconProcessorConfig,
+        spec: Arc<ChainSpec>,
+    ) -> Self {
         let head = harness.chain.head_snapshot();
 
         assert_eq!(
@@ -396,36 +441,24 @@ impl TestRig {
         }
     }
 
-    pub fn enqueue_rpc_block(&self) {
+    pub fn enqueue_lookup_block(&self) {
         let block_root = self.next_block.canonical_root();
         self.network_beacon_processor
-            .send_rpc_beacon_block(
+            .send_lookup_beacon_block(
                 block_root,
-                RpcBlock::new(
-                    self.next_block.clone(),
-                    None,
-                    &self._harness.chain.data_availability_checker,
-                    self._harness.spec.clone(),
-                )
-                .unwrap(),
+                LookupBlock::new(self.next_block.clone()),
                 std::time::Duration::default(),
                 BlockProcessType::SingleBlock { id: 0 },
             )
             .unwrap();
     }
 
-    pub fn enqueue_single_lookup_rpc_block(&self) {
+    pub fn enqueue_single_lookup_block(&self) {
         let block_root = self.next_block.canonical_root();
         self.network_beacon_processor
-            .send_rpc_beacon_block(
+            .send_lookup_beacon_block(
                 block_root,
-                RpcBlock::new(
-                    self.next_block.clone(),
-                    None,
-                    &self._harness.chain.data_availability_checker,
-                    self._harness.spec.clone(),
-                )
-                .unwrap(),
+                LookupBlock::new(self.next_block.clone()),
                 std::time::Duration::default(),
                 BlockProcessType::SingleBlock { id: 1 },
             )
@@ -489,6 +522,29 @@ impl TestRig {
                     count,
                     columns,
                 },
+            )
+            .unwrap();
+    }
+
+    pub fn enqueue_payload_envelopes_by_range_request(&self, start_slot: u64, count: u64) {
+        self.network_beacon_processor
+            .send_payload_envelopes_by_range_request(
+                PeerId::random(),
+                InboundRequestId::new_unchecked(42, 24),
+                PayloadEnvelopesByRangeRequest { start_slot, count },
+            )
+            .unwrap();
+    }
+
+    pub fn enqueue_payload_envelopes_by_root_request(
+        &self,
+        beacon_block_roots: RuntimeVariableList<Hash256>,
+    ) {
+        self.network_beacon_processor
+            .send_payload_envelopes_by_roots_request(
+                PeerId::random(),
+                InboundRequestId::new_unchecked(42, 24),
+                PayloadEnvelopesByRootRequest { beacon_block_roots },
             )
             .unwrap();
     }
@@ -940,20 +996,20 @@ async fn data_column_reconstruction_at_deadline() {
         .set_current_time(slot_start + Duration::from_millis(reconstruction_deadline_millis));
 
     let min_columns_for_reconstruction = E::number_of_columns() / 2;
+
+    // Enqueue all columns first - at deadline, reconstruction races with gossip drain
     for i in 0..min_columns_for_reconstruction {
         rig.enqueue_gossip_data_columns(i);
-        rig.assert_event_journal_completes(&[WorkType::GossipDataColumnSidecar])
-            .await;
     }
 
-    // Since we're at the reconstruction deadline, reconstruction should be triggered immediately
-    rig.assert_event_journal_with_timeout(
-        &[WorkType::ColumnReconstruction.into()],
-        Duration::from_millis(50),
-        false,
-        false,
-    )
-    .await;
+    // Expect all gossip events + reconstruction
+    let mut expected_events: Vec<WorkType> = (0..min_columns_for_reconstruction)
+        .map(|_| WorkType::GossipDataColumnSidecar)
+        .collect();
+    expected_events.push(WorkType::ColumnReconstruction);
+
+    rig.assert_event_journal_contains_ordered(&expected_events)
+        .await;
 }
 
 // Test the column reconstruction is delayed for columns that arrive for a previous slot.
@@ -1264,7 +1320,7 @@ async fn attestation_to_unknown_block_processed(import_method: BlockImportMethod
             }
         }
         BlockImportMethod::Rpc => {
-            rig.enqueue_rpc_block();
+            rig.enqueue_lookup_block();
             events.push(WorkType::RpcBlock);
             if num_blobs > 0 {
                 rig.enqueue_single_lookup_rpc_blobs();
@@ -1350,7 +1406,7 @@ async fn aggregate_attestation_to_unknown_block(import_method: BlockImportMethod
             }
         }
         BlockImportMethod::Rpc => {
-            rig.enqueue_rpc_block();
+            rig.enqueue_lookup_block();
             events.push(WorkType::RpcBlock);
             if num_blobs > 0 {
                 rig.enqueue_single_lookup_rpc_blobs();
@@ -1544,7 +1600,7 @@ async fn test_rpc_block_reprocessing() {
     let next_block_root = rig.next_block.canonical_root();
     // Insert the next block into the duplicate cache manually
     let handle = rig.duplicate_cache.check_and_insert(next_block_root);
-    rig.enqueue_single_lookup_rpc_block();
+    rig.enqueue_single_lookup_block();
     rig.assert_event_journal_completes(&[WorkType::RpcBlock])
         .await;
 
@@ -1986,3 +2042,306 @@ async fn test_data_columns_by_range_request_only_returns_requested_columns() {
         "Should have received at least some data columns"
     );
 }
+
+/// Test that DataColumnsByRange does not return duplicate data columns for skip slots.
+///
+/// When skip slots occur, `forwards_iter_block_roots` returns the same block root for
+/// consecutive slots. The deduplication in `get_block_roots_from_store` must use
+/// `unique_by` on the root (not the full `(root, slot)` tuple) to avoid serving
+/// duplicate data columns for the same block.
+#[tokio::test]
+async fn test_data_columns_by_range_no_duplicates_with_skip_slots() {
+    if test_spec::<E>().fulu_fork_epoch.is_none() {
+        return;
+    };
+
+    // Build a chain of 128 slots (4 epochs) with skip slots at positions 5 and 6.
+    // After 4 epochs, finalized_epoch=2 (finalized_slot=64). Requesting slots 0-9
+    // satisfies req_start_slot + req_count <= finalized_slot (10 <= 64), which routes
+    // through `get_block_roots_from_store` — the code path with the bug.
+    let skip_slots: HashSet<u64> = [5, 6].into_iter().collect();
+    let mut rig = TestRig::new_with_skip_slots(128, &skip_slots).await;
+
+    let all_custody_columns = rig.chain.custody_columns_for_epoch(Some(Epoch::new(0)));
+    let requested_column = vec![all_custody_columns[0]];
+
+    // Request a range that spans the skip slots (slots 0 through 9).
+    let start_slot = 0;
+    let slot_count = 10;
+
+    rig.network_beacon_processor
+        .send_data_columns_by_range_request(
+            PeerId::random(),
+            InboundRequestId::new_unchecked(42, 24),
+            DataColumnsByRangeRequest {
+                start_slot,
+                count: slot_count,
+                columns: requested_column.clone(),
+            },
+        )
+        .unwrap();
+
+    // Collect block roots from all data column responses.
+    let mut block_roots: Vec<Hash256> = Vec::new();
+
+    while let Some(next) = rig.network_rx.recv().await {
+        if let NetworkMessage::SendResponse {
+            peer_id: _,
+            response: Response::DataColumnsByRange(data_column),
+            inbound_request_id: _,
+        } = next
+        {
+            if let Some(column) = data_column {
+                block_roots.push(column.block_root());
+            } else {
+                break;
+            }
+        } else {
+            panic!("unexpected message {:?}", next);
+        }
+    }
+
+    assert!(
+        !block_roots.is_empty(),
+        "Should have received at least some data columns"
+    );
+
+    // Before the fix, skip slots caused the same block root to appear multiple times
+    // (once per skip slot) because .unique() on (Hash256, Slot) tuples didn't deduplicate.
+    let unique_roots: HashSet<_> = block_roots.iter().collect();
+    assert_eq!(
+        block_roots.len(),
+        unique_roots.len(),
+        "Response contained duplicate block roots: got {} columns but only {} unique roots",
+        block_roots.len(),
+        unique_roots.len(),
+    );
+}
+
+/// Create a test `SignedExecutionPayloadEnvelope` with the given slot and beacon block root.
+fn make_test_payload_envelope(
+    slot: Slot,
+    beacon_block_root: Hash256,
+) -> SignedExecutionPayloadEnvelope<E> {
+    SignedExecutionPayloadEnvelope {
+        message: ExecutionPayloadEnvelope {
+            payload: ExecutionPayloadGloas::default(),
+            execution_requests: ExecutionRequests::default(),
+            builder_index: 0,
+            beacon_block_root,
+            slot,
+            state_root: Hash256::zero(),
+        },
+        signature: Signature::empty(),
+    }
+}
+
+#[tokio::test]
+async fn test_payload_envelopes_by_range() {
+    // Only test when Gloas fork is scheduled
+    if test_spec::<E>().gloas_fork_epoch.is_none() {
+        return;
+    };
+
+    let mut rig = TestRig::new(64).await;
+    let start_slot = 0;
+    let slot_count = 32;
+
+    // Manually store payload envelopes for each block in the range
+    let mut expected_roots = Vec::new();
+    for slot in start_slot..slot_count {
+        if let Some(root) = rig
+            .chain
+            .block_root_at_slot(Slot::new(slot), WhenSlotSkipped::None)
+            .unwrap()
+        {
+            let envelope = make_test_payload_envelope(Slot::new(slot), root);
+            rig.chain
+                .store
+                .put_payload_envelope(&root, envelope)
+                .unwrap();
+            expected_roots.push(root);
+        }
+    }
+
+    rig.enqueue_payload_envelopes_by_range_request(start_slot, slot_count);
+
+    let mut actual_roots = Vec::new();
+    while let Some(next) = rig.network_rx.recv().await {
+        if let NetworkMessage::SendResponse {
+            peer_id: _,
+            response: Response::PayloadEnvelopesByRange(envelope),
+            inbound_request_id: _,
+        } = next
+        {
+            if let Some(env) = envelope {
+                actual_roots.push(env.beacon_block_root());
+            } else {
+                break;
+            }
+        } else if let NetworkMessage::SendErrorResponse { .. } = next {
+            // Error response terminates the stream
+            break;
+        } else {
+            panic!("unexpected message {:?}", next);
+        }
+    }
+    assert_eq!(expected_roots, actual_roots);
+}
+
+#[tokio::test]
+async fn test_payload_envelopes_by_root() {
+    // Only test when Gloas fork is scheduled
+    if test_spec::<E>().gloas_fork_epoch.is_none() {
+        return;
+    };
+
+    let mut rig = TestRig::new(64).await;
+
+    let block_root = rig
+        .chain
+        .block_root_at_slot(Slot::new(1), WhenSlotSkipped::None)
+        .unwrap()
+        .unwrap();
+
+    // Manually store a payload envelope for this block
+    let envelope = make_test_payload_envelope(Slot::new(1), block_root);
+    rig.chain
+        .store
+        .put_payload_envelope(&block_root, envelope)
+        .unwrap();
+
+    let roots = RuntimeVariableList::new(vec![block_root], 1).unwrap();
+    rig.enqueue_payload_envelopes_by_root_request(roots);
+
+    let mut actual_roots = Vec::new();
+    while let Some(next) = rig.network_rx.recv().await {
+        if let NetworkMessage::SendResponse {
+            peer_id: _,
+            response: Response::PayloadEnvelopesByRoot(envelope),
+            inbound_request_id: _,
+        } = next
+        {
+            if let Some(env) = envelope {
+                actual_roots.push(env.beacon_block_root());
+            } else {
+                break;
+            }
+        } else {
+            panic!("unexpected message {:?}", next);
+        }
+    }
+    assert_eq!(vec![block_root], actual_roots);
+}
+
+#[tokio::test]
+async fn test_payload_envelopes_by_root_unknown_root_returns_empty() {
+    // Only test when Gloas fork is scheduled
+    if test_spec::<E>().gloas_fork_epoch.is_none() {
+        return;
+    };
+
+    let mut rig = TestRig::new(64).await;
+
+    // Request envelope for a root that has no stored envelope
+    let block_root = rig
+        .chain
+        .block_root_at_slot(Slot::new(1), WhenSlotSkipped::None)
+        .unwrap()
+        .unwrap();
+
+    // Don't store any envelope — the handler should return 0 envelopes
+    let roots = RuntimeVariableList::new(vec![block_root], 1).unwrap();
+    rig.enqueue_payload_envelopes_by_root_request(roots);
+
+    let mut actual_count = 0;
+    while let Some(next) = rig.network_rx.recv().await {
+        if let NetworkMessage::SendResponse {
+            peer_id: _,
+            response: Response::PayloadEnvelopesByRoot(envelope),
+            inbound_request_id: _,
+        } = next
+        {
+            if envelope.is_some() {
+                actual_count += 1;
+            } else {
+                break;
+            }
+        } else {
+            panic!("unexpected message {:?}", next);
+        }
+    }
+    assert_eq!(0, actual_count);
+}
+
+#[tokio::test]
+async fn test_payload_envelopes_by_range_no_duplicates_with_skip_slots() {
+    // Only test when Gloas fork is scheduled
+    if test_spec::<E>().gloas_fork_epoch.is_none() {
+        return;
+    };
+
+    // Build a chain of 128 slots (4 epochs) with skip slots at positions 5 and 6.
+    let skip_slots: HashSet<u64> = [5, 6].into_iter().collect();
+    let mut rig = TestRig::new_with_skip_slots(128, &skip_slots).await;
+
+    let start_slot = 0u64;
+    let slot_count = 10u64;
+
+    // Store payload envelopes for all blocks in the range (skipping the skip slots)
+    for slot in start_slot..slot_count {
+        if let Some(root) = rig
+            .chain
+            .block_root_at_slot(Slot::new(slot), WhenSlotSkipped::None)
+            .unwrap()
+        {
+            let envelope = make_test_payload_envelope(Slot::new(slot), root);
+            rig.chain
+                .store
+                .put_payload_envelope(&root, envelope)
+                .unwrap();
+        }
+    }
+
+    rig.enqueue_payload_envelopes_by_range_request(start_slot, slot_count);
+
+    let mut beacon_block_roots: Vec<Hash256> = Vec::new();
+    while let Some(next) = rig.network_rx.recv().await {
+        if let NetworkMessage::SendResponse {
+            peer_id: _,
+            response: Response::PayloadEnvelopesByRange(envelope),
+            inbound_request_id: _,
+        } = next
+        {
+            if let Some(env) = envelope {
+                beacon_block_roots.push(env.beacon_block_root());
+            } else {
+                break;
+            }
+        } else if let NetworkMessage::SendErrorResponse { .. } = next {
+            break;
+        } else {
+            panic!("unexpected message {:?}", next);
+        }
+    }
+
+    assert!(
+        !beacon_block_roots.is_empty(),
+        "Should have received at least some payload envelopes"
+    );
+
+    // Skip slots should not cause duplicate envelopes for the same block root
+    let unique_roots: HashSet<_> = beacon_block_roots.iter().collect();
+    assert_eq!(
+        beacon_block_roots.len(),
+        unique_roots.len(),
+        "Response contained duplicate block roots: got {} envelopes but only {} unique roots",
+        beacon_block_roots.len(),
+        unique_roots.len(),
+    );
+}
+
+// TODO(ePBS): Add integration tests for envelope deferral (UnknownBlockForEnvelope):
+//   1. Gossip envelope arrives before its block → queued via UnknownBlockForEnvelope
+//   2. Block imported → envelope released and processed successfully
+//   3. Timeout path → envelope released and re-verified
