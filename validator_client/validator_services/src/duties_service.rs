@@ -480,19 +480,10 @@ impl<S: ValidatorStore, T: SlotClock + 'static> DutiesService<S, T> {
 
     /// Returns the total number of validators that have PTC duties in the given epoch.
     pub fn ptc_count(&self, epoch: Epoch) -> usize {
-        // Only collect validators that are considered safe in terms of doppelganger protection.
-        let signing_pubkeys: HashSet<_> = self
-            .validator_store
-            .voting_pubkeys(DoppelgangerStatus::only_safe);
         self.ptc_duties
             .read()
             .get(&epoch)
-            .map(|(_, duties)| {
-                duties
-                    .iter()
-                    .filter(|ptc_duty| signing_pubkeys.contains(&ptc_duty.pubkey))
-                    .count()
-            })
+            .map(|(_, duties)| duties.len())
             .unwrap_or(0)
     }
 
@@ -565,19 +556,13 @@ impl<S: ValidatorStore, T: SlotClock + 'static> DutiesService<S, T> {
     pub fn get_ptc_duties_for_slot(&self, slot: Slot) -> Vec<PtcDuty> {
         let epoch = slot.epoch(S::E::slots_per_epoch());
 
-        let signing_pubkeys: HashSet<_> = self
-            .validator_store
-            .voting_pubkeys(DoppelgangerStatus::only_safe);
-
         self.ptc_duties
             .read()
             .get(&epoch)
             .map(|(_, ptc_duties)| {
                 ptc_duties
                     .iter()
-                    .filter(|ptc_duty| {
-                        ptc_duty.slot == slot && signing_pubkeys.contains(&ptc_duty.pubkey)
-                    })
+                    .filter(|ptc_duty| ptc_duty.slot == slot)
                     .cloned()
                     .collect()
             })
