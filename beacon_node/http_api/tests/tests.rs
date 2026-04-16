@@ -4443,19 +4443,42 @@ impl ApiTester {
             return self;
         }
 
-        let result = self
+        let response = self
             .client
             .get_validator_payload_attestation_data(slot)
             .await
-            .unwrap()
-            .into_data();
+            .unwrap();
 
+        assert_eq!(response.version(), Some(fork_name));
+
+        let result = response.into_data();
         let expected = self.chain.produce_payload_attestation_data(slot).unwrap();
 
         assert_eq!(result.beacon_block_root, expected.beacon_block_root);
         assert_eq!(result.slot, expected.slot);
         assert_eq!(result.payload_present, expected.payload_present);
         assert_eq!(result.blob_data_available, expected.blob_data_available);
+
+        self
+    }
+
+    pub async fn test_get_validator_payload_attestation_data_ssz(self) -> Self {
+        let slot = self.chain.slot().unwrap();
+        let fork_name = self.chain.spec.fork_name_at_slot::<E>(slot);
+
+        if !fork_name.gloas_enabled() {
+            return self;
+        }
+
+        let result = self
+            .client
+            .get_validator_payload_attestation_data_ssz(slot)
+            .await
+            .unwrap();
+
+        let expected = self.chain.produce_payload_attestation_data(slot).unwrap();
+
+        assert_eq!(result, expected);
 
         self
     }
@@ -8109,32 +8132,25 @@ async fn get_validator_attestation_data_with_skip_slots() {
 #[ignore]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn get_validator_payload_attestation_data() {
-    let mut config = ApiTesterConfig::default();
-    config.spec.altair_fork_epoch = Some(Epoch::new(0));
-    config.spec.bellatrix_fork_epoch = Some(Epoch::new(0));
-    config.spec.capella_fork_epoch = Some(Epoch::new(0));
-    config.spec.deneb_fork_epoch = Some(Epoch::new(0));
-    config.spec.electra_fork_epoch = Some(Epoch::new(0));
-    config.spec.fulu_fork_epoch = Some(Epoch::new(0));
-    config.spec.gloas_fork_epoch = Some(Epoch::new(0));
-
-    ApiTester::new_from_config(config)
+    ApiTester::new()
         .await
         .test_get_validator_payload_attestation_data()
         .await;
 }
 
+// TODO(EIP-7732): Remove `#[ignore]` once gloas block production is implemented
+#[ignore]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn get_validator_payload_attestation_data_ssz() {
+    ApiTester::new()
+        .await
+        .test_get_validator_payload_attestation_data_ssz()
+        .await;
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn get_validator_payload_attestation_data_pre_gloas() {
-    let mut config = ApiTesterConfig::default();
-    config.spec.altair_fork_epoch = Some(Epoch::new(0));
-    config.spec.bellatrix_fork_epoch = Some(Epoch::new(0));
-    config.spec.capella_fork_epoch = Some(Epoch::new(0));
-    config.spec.deneb_fork_epoch = Some(Epoch::new(0));
-    config.spec.electra_fork_epoch = Some(Epoch::new(0));
-    config.spec.fulu_fork_epoch = Some(Epoch::new(0));
-
-    ApiTester::new_from_config(config)
+    ApiTester::new()
         .await
         .test_get_validator_payload_attestation_data_pre_gloas()
         .await;

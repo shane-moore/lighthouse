@@ -1484,7 +1484,7 @@ where
             && self.is_finalized_checkpoint_or_descendant(*block_root)
     }
 
-    // Returns `true` if the payload is known **and** a descendant of the finalized root.
+    /// Returns `true` if the payload is known **and** a descendant of the finalized root.
     pub fn contains_payload(&self, block_root: &Hash256) -> bool {
         self.proto_array.is_payload_received(block_root)
             && self.is_finalized_checkpoint_or_descendant(*block_root)

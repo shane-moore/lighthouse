@@ -2965,6 +2965,28 @@ impl BeaconNodeHttpClient {
             .map(BeaconResponse::ForkVersioned)
     }
 
+    /// `GET validator/payload_attestation_data/{slot}` in SSZ format
+    pub async fn get_validator_payload_attestation_data_ssz(
+        &self,
+        slot: Slot,
+    ) -> Result<PayloadAttestationData, Error> {
+        let mut path = self.eth_path(V1)?;
+
+        path.path_segments_mut()
+            .map_err(|()| Error::InvalidUrl(self.server.clone()))?
+            .push("validator")
+            .push("payload_attestation_data")
+            .push(&slot.to_string());
+
+        let opt_response = self
+            .get_bytes_opt_accept_header(path, Accept::Ssz, self.timeouts.payload_attestation)
+            .await?;
+
+        let response_bytes = opt_response.ok_or(Error::StatusCode(StatusCode::NOT_FOUND))?;
+
+        PayloadAttestationData::from_ssz_bytes(&response_bytes).map_err(Error::InvalidSsz)
+    }
+
     /// `GET v1/validator/aggregate_attestation?slot,attestation_data_root`
     pub async fn get_validator_aggregate_attestation_v1<E: EthSpec>(
         &self,
