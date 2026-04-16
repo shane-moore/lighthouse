@@ -2121,12 +2121,13 @@ impl<T: BeaconChainTypes> BeaconChain<T> {
 
         let beacon_block_root = head.beacon_block_root;
 
-        // TODO(EIP-7732): Check if we've seen a SignedExecutionPayloadEnvelope
-        // referencing this block root. For now, default to false.
-        let payload_present = false;
+        let payload_present = self
+            .canonical_head
+            .fork_choice_read_lock()
+            .contains_payload(&beacon_block_root);
 
-        // TODO(EIP-7732): Check blob data availability. For now, default to false.
-        let blob_data_available = false;
+        // TODO(EIP-7732): Check blob data availability. For now, default to true.
+        let blob_data_available = true;
 
         Ok(PayloadAttestationData {
             beacon_block_root,
