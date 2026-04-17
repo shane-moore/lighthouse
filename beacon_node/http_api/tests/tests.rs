@@ -8105,7 +8105,7 @@ async fn get_validator_attestation_data_with_skip_slots() {
         .await;
 }
 
-// TODO(EIP-7732): Remove `#[ignore]` once gloas block production is implemented
+// TODO(EIP-7732): Remove `#[ignore]` once gloas beacon chain harness is implemented
 #[ignore]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn get_validator_payload_attestation_data() {
