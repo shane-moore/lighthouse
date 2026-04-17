@@ -2121,6 +2121,9 @@ impl<T: BeaconChainTypes> BeaconChain<T> {
 
         let beacon_block_root = head.beacon_block_root;
 
+        // TODO(gloas) the spec only requires that the payload be seen. right
+        // now we are setting payload_present to `true` if the envelope was imported
+        // into fork choice which is a stricter requirement than the spec requires.
         let payload_present = self
             .canonical_head
             .fork_choice_read_lock()
