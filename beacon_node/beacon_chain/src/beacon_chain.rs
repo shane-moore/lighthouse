@@ -2121,8 +2121,9 @@ impl<T: BeaconChainTypes> BeaconChain<T> {
 
         let beacon_block_root = head.beacon_block_root;
 
-        // TODO(gloas) this isn't really what the `envelope_times_cache` is meant for.
-        // We should use a dedicated payload envelope cache instead (maybe the new Gloas DA cache?)
+        // TODO(gloas) do we want to use a dedicated envelope cache instead?
+        // Maybe the new gloas DA cache? (Or should the gloas DA cache use 
+        // the envelopes_times_cache internally?)
         let payload_present = self
             .envelope_times_cache
             .read()
