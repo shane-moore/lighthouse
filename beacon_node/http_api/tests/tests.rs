@@ -3,7 +3,8 @@ use beacon_chain::test_utils::RelativeSyncCommittee;
 use beacon_chain::{
     BeaconChain, ChainConfig, StateSkipConfig, WhenSlotSkipped,
     test_utils::{
-        AttestationStrategy, BeaconChainHarness, BlockStrategy, EphemeralHarnessType, test_spec,
+        AttestationStrategy, BeaconChainHarness, BlockStrategy, EphemeralHarnessType,
+        fork_name_from_env, test_spec,
     },
 };
 use bls::{AggregateSignature, Keypair, PublicKeyBytes, SecretKey, Signature, SignatureBytes};
@@ -4438,11 +4439,6 @@ impl ApiTester {
         let slot = self.chain.slot().unwrap();
         let fork_name = self.chain.spec.fork_name_at_slot::<E>(slot);
 
-        // Payload attestation data is only available in Gloas fork.
-        if !fork_name.gloas_enabled() {
-            return self;
-        }
-
         let response = self
             .client
             .get_validator_payload_attestation_data(slot)
@@ -4459,38 +4455,19 @@ impl ApiTester {
         assert_eq!(result.payload_present, expected.payload_present);
         assert_eq!(result.blob_data_available, expected.blob_data_available);
 
-        self
-    }
-
-    pub async fn test_get_validator_payload_attestation_data_ssz(self) -> Self {
-        let slot = self.chain.slot().unwrap();
-        let fork_name = self.chain.spec.fork_name_at_slot::<E>(slot);
-
-        if !fork_name.gloas_enabled() {
-            return self;
-        }
-
-        let result = self
+        let ssz_result = self
             .client
             .get_validator_payload_attestation_data_ssz(slot)
             .await
             .unwrap();
 
-        let expected = self.chain.produce_payload_attestation_data(slot).unwrap();
-
-        assert_eq!(result, expected);
+        assert_eq!(ssz_result, expected);
 
         self
     }
 
     pub async fn test_get_validator_payload_attestation_data_pre_gloas(self) -> Self {
         let slot = self.chain.slot().unwrap();
-        let fork_name = self.chain.spec.fork_name_at_slot::<E>(slot);
-
-        // This test is for pre-Gloas forks
-        if fork_name.gloas_enabled() {
-            return self;
-        }
 
         // The endpoint should return a 400 error for pre-Gloas forks
         match self
@@ -8132,24 +8109,20 @@ async fn get_validator_attestation_data_with_skip_slots() {
 #[ignore]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn get_validator_payload_attestation_data() {
+    if !fork_name_from_env().is_some_and(|f| f.gloas_enabled()) {
+        return;
+    }
     ApiTester::new()
         .await
         .test_get_validator_payload_attestation_data()
         .await;
 }
 
-// TODO(EIP-7732): Remove `#[ignore]` once gloas block production is implemented
-#[ignore]
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn get_validator_payload_attestation_data_ssz() {
-    ApiTester::new()
-        .await
-        .test_get_validator_payload_attestation_data_ssz()
-        .await;
-}
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn get_validator_payload_attestation_data_pre_gloas() {
+    if fork_name_from_env().is_some_and(|f| f.gloas_enabled()) {
+        return;
+    }
     ApiTester::new()
         .await
         .test_get_validator_payload_attestation_data_pre_gloas()
