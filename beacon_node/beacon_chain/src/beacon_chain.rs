@@ -2121,13 +2121,13 @@ impl<T: BeaconChainTypes> BeaconChain<T> {
 
         let beacon_block_root = head.beacon_block_root;
 
-        // TODO(gloas) the spec only requires that the payload be seen. right
-        // now we are setting payload_present to `true` if the envelope was imported
-        // into fork choice which is a stricter requirement than the spec requires.
+        // TODO(gloas) this isn't really what the `envelope_times_cache` is meant for.
+        // We should use a dedicated payload envelope cache instead (maybe the new Gloas DA cache?)
         let payload_present = self
-            .canonical_head
-            .fork_choice_read_lock()
-            .contains_payload(&beacon_block_root);
+            .envelope_times_cache
+            .read()
+            .cache
+            .contains_key(&beacon_block_root);
 
         // TODO(EIP-7732): Check blob data availability. For now, default to true.
         let blob_data_available = true;
