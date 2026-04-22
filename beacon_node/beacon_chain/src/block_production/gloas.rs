@@ -163,21 +163,14 @@ impl<T: BeaconChainTypes> BeaconChain<T> {
             .map_err(BlockProductionError::TokioJoin)??;
 
         // Extract the parent's execution requests from the envelope (if parent was full).
-        // Pre-Gloas blocks have no envelope, so use empty execution requests.
-        let parent_block_slot = state.latest_block_header().slot;
-        let parent_slot_gloas = self
-            .spec
-            .fork_name_at_slot::<T::EthSpec>(parent_block_slot)
-            .gloas_enabled();
-        let parent_execution_requests =
-            if parent_payload_status == PayloadStatus::Full && parent_slot_gloas {
-                parent_envelope
-                    .as_ref()
-                    .map(|env| env.message.execution_requests.clone())
-                    .ok_or(BlockProductionError::MissingParentExecutionPayload)?
-            } else {
-                ExecutionRequests::default()
-            };
+        let parent_execution_requests = if parent_payload_status == PayloadStatus::Full {
+            parent_envelope
+                .as_ref()
+                .map(|env| env.message.execution_requests.clone())
+                .ok_or(BlockProductionError::MissingParentExecutionPayload)?
+        } else {
+            ExecutionRequests::default()
+        };
 
         // Part 2/3 (async)
         //
