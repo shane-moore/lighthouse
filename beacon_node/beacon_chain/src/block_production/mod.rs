@@ -83,10 +83,21 @@ impl<T: BeaconChainTypes> BeaconChain<T> {
                     .get_advanced_hot_state(head_block_root, slot, parent_state_root)
                     .map_err(BlockProductionError::FailedToLoadState)?
                     .ok_or(BlockProductionError::UnableToProduceAtSlot(slot))?;
+                // Pre-Gloas blocks always embed their execution payload, so if
+                // the head is pre-Gloas treat its payload as Full.
+                let parent_payload_status = if !self
+                    .spec
+                    .fork_name_at_slot::<T::EthSpec>(head_slot)
+                    .gloas_enabled()
+                {
+                    PayloadStatus::Full
+                } else {
+                    head_payload_status
+                };
                 BlockProductionState {
                     state,
                     state_root: Some(state_root),
-                    parent_payload_status: head_payload_status,
+                    parent_payload_status,
                     parent_envelope: head_envelope,
                 }
             }
