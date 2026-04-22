@@ -3474,7 +3474,6 @@ impl ApiTester {
         self
     }
 
-    // TODO(EIP-7732): Add test_get_validator_duties_ptc function to test PTC duties endpoint
     pub async fn test_get_validator_duties_proposer_v2(self) -> Self {
         let current_epoch = self.chain.epoch().unwrap();
 
@@ -3712,7 +3711,6 @@ impl ApiTester {
                         "duty slot should be in requested epoch"
                     );
 
-                    // Verify pubkey matches the validator
                     let expected_pubkey = state
                         .validators()
                         .get(duty.validator_index as usize)
@@ -3721,6 +3719,15 @@ impl ApiTester {
                     assert_eq!(
                         duty.pubkey, expected_pubkey,
                         "pubkey should match validator"
+                    );
+
+                    let expected_slot = state
+                        .get_ptc_assignment(duty.validator_index as usize, epoch, &self.chain.spec)
+                        .unwrap();
+                    assert_eq!(
+                        Some(duty.slot),
+                        expected_slot,
+                        "duty slot should match state PTC assignment"
                     );
                 }
             }
@@ -8043,11 +8050,17 @@ async fn get_validator_duties_proposer_v2_with_skip_slots() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn get_validator_duties_ptc() {
+    if !fork_name_from_env().is_some_and(|f| f.gloas_enabled()) {
+        return;
+    }
     ApiTester::new().await.test_get_validator_duties_ptc().await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn get_validator_duties_ptc_with_skip_slots() {
+    if !fork_name_from_env().is_some_and(|f| f.gloas_enabled()) {
+        return;
+    }
     ApiTester::new()
         .await
         .skip_slots(E::slots_per_epoch() * 2)
