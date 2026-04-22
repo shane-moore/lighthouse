@@ -696,9 +696,6 @@ impl<T: BeaconChainTypes> BeaconChain<T> {
         let parent_bid = state.latest_execution_payload_bid()?;
 
         // TODO(gloas): need should_extend_payload check here as well
-        // At the fork transition the parent is pre-Gloas and always embeds its payload,
-        // so use block_hash directly. Pre-Gloas blocks have Empty status in fork choice
-        // but their payload is always present.
         let parent_is_pre_gloas = !self
             .spec
             .fork_name_at_slot::<T::EthSpec>(produce_at_slot.saturating_sub(1u64))
