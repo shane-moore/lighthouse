@@ -3598,6 +3598,17 @@ impl ApiTester {
             "should not get attester duties outside of tolerance"
         );
 
+        assert_eq!(
+            self.client
+                .post_validator_duties_ptc(next_epoch, &[0])
+                .await
+                .unwrap_err()
+                .status()
+                .map(Into::into),
+            Some(400),
+            "should not get ptc duties outside of tolerance"
+        );
+
         self.chain.slot_clock.set_current_time(
             current_epoch_start - self.chain.spec.maximum_gossip_clock_disparity(),
         );
@@ -3620,6 +3631,100 @@ impl ApiTester {
             .post_validator_duties_attester(next_epoch, &[0])
             .await
             .expect("should get attester duties within tolerance");
+
+        self.client
+            .post_validator_duties_ptc(next_epoch, &[0])
+            .await
+            .expect("should get ptc duties within tolerance");
+
+        self
+    }
+
+    pub async fn test_get_validator_duties_ptc(self) -> Self {
+        let current_epoch = self.chain.epoch().unwrap().as_u64();
+
+        let half = current_epoch / 2;
+        let first = current_epoch - half;
+        let last = current_epoch + half;
+
+        for epoch in first..=last {
+            for indices in self.interesting_validator_indices() {
+                let epoch = Epoch::from(epoch);
+
+                // The endpoint does not allow getting duties past the next epoch.
+                if epoch > current_epoch + 1 {
+                    assert_eq!(
+                        self.client
+                            .post_validator_duties_ptc(epoch, indices.as_slice())
+                            .await
+                            .unwrap_err()
+                            .status()
+                            .map(Into::into),
+                        Some(400)
+                    );
+                    continue;
+                }
+
+                let results = self
+                    .client
+                    .post_validator_duties_ptc(epoch, indices.as_slice())
+                    .await
+                    .unwrap();
+
+                let dependent_root = self
+                    .chain
+                    .block_root_at_slot(
+                        (epoch - 1).start_slot(E::slots_per_epoch()) - 1,
+                        WhenSlotSkipped::Prev,
+                    )
+                    .unwrap()
+                    .unwrap_or(self.chain.head_beacon_block_root());
+
+                assert_eq!(results.dependent_root, dependent_root);
+
+                let result_duties = results.data;
+
+                let state = self
+                    .chain
+                    .state_at_slot(
+                        epoch.start_slot(E::slots_per_epoch()),
+                        StateSkipConfig::WithStateRoots,
+                    )
+                    .unwrap();
+
+                let expected_len = indices
+                    .iter()
+                    .filter(|i| **i < state.validators().len() as u64)
+                    .count();
+
+                // PTC duties return only validators that have duties (not all requested validators)
+                assert!(result_duties.len() <= expected_len);
+
+                // Verify each returned duty
+                for duty in &result_duties {
+                    assert!(
+                        indices.contains(&duty.validator_index),
+                        "returned duty validator index should be in requested indices"
+                    );
+                    assert_eq!(
+                        duty.slot.epoch(E::slots_per_epoch()),
+                        epoch,
+                        "duty slot should be in requested epoch"
+                    );
+
+                    // Verify pubkey matches the validator
+                    let expected_pubkey = state
+                        .validators()
+                        .get(duty.validator_index as usize)
+                        .unwrap()
+                        .pubkey;
+                    assert_eq!(
+                        duty.pubkey, expected_pubkey,
+                        "pubkey should match validator"
+                    );
+                }
+            }
+        }
 
         self
     }
@@ -7934,6 +8039,20 @@ async fn get_validator_duties_proposer_v2_with_skip_slots() {
     .skip_slots(E::slots_per_epoch() * 2)
     .test_get_validator_duties_proposer_v2()
     .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn get_validator_duties_ptc() {
+    ApiTester::new().await.test_get_validator_duties_ptc().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn get_validator_duties_ptc_with_skip_slots() {
+    ApiTester::new()
+        .await
+        .skip_slots(E::slots_per_epoch() * 2)
+        .test_get_validator_duties_ptc()
+        .await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
