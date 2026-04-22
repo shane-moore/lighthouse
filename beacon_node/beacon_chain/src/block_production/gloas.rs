@@ -164,9 +164,10 @@ impl<T: BeaconChainTypes> BeaconChain<T> {
 
         // Extract the parent's execution requests from the envelope (if parent was full).
         // Pre-Gloas blocks have no envelope, so use empty execution requests.
+        let parent_block_slot = state.latest_block_header().slot;
         let parent_slot_gloas = self
             .spec
-            .fork_name_at_slot::<T::EthSpec>(produce_at_slot.saturating_sub(1u64))
+            .fork_name_at_slot::<T::EthSpec>(parent_block_slot)
             .gloas_enabled();
         let parent_execution_requests =
             if parent_payload_status == PayloadStatus::Full && parent_slot_gloas {
@@ -696,9 +697,10 @@ impl<T: BeaconChainTypes> BeaconChain<T> {
         let parent_bid = state.latest_execution_payload_bid()?;
 
         // TODO(gloas): need should_extend_payload check here as well
+        let parent_block_slot = state.latest_block_header().slot;
         let parent_is_pre_gloas = !self
             .spec
-            .fork_name_at_slot::<T::EthSpec>(produce_at_slot.saturating_sub(1u64))
+            .fork_name_at_slot::<T::EthSpec>(parent_block_slot)
             .gloas_enabled();
         let parent_block_hash =
             if parent_payload_status == PayloadStatus::Full || parent_is_pre_gloas {
