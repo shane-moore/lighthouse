@@ -3151,7 +3151,7 @@ impl BeaconNodeHttpClient {
         self.post_with_timeout_and_response(
             path,
             &ValidatorIndexDataRef(indices),
-            self.timeouts.sync_duties,
+            self.timeouts.ptc_duties,
         )
         .await
     }
