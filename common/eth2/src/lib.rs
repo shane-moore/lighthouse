@@ -3347,29 +3347,4 @@ impl BeaconNodeHttpClient {
         self.post_with_timeout_and_response(path, &selections, self.timeouts.sync_aggregators)
             .await
     }
-
-    // TODO(EIP-7732): Create corresponding beacon node response endpoint per spec
-    // https://github.com/ethereum/beacon-APIs/pull/552
-    /// `POST validator/duties/ptc/{epoch}`
-    pub async fn post_validator_duties_ptc(
-        &self,
-        epoch: Epoch,
-        indices: &[u64],
-    ) -> Result<DutiesResponse<Vec<PtcDuty>>, Error> {
-        let mut path = self.eth_path(V1)?;
-
-        path.path_segments_mut()
-            .map_err(|()| Error::InvalidUrl(self.server.clone()))?
-            .push("validator")
-            .push("duties")
-            .push("ptc")
-            .push(&epoch.to_string());
-
-        self.post_with_timeout_and_response(
-            path,
-            &ValidatorIndexDataRef(indices),
-            self.timeouts.ptc_duties,
-        )
-        .await
-    }
 }
