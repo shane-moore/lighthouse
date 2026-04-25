@@ -3691,45 +3691,25 @@ impl ApiTester {
                     )
                     .unwrap();
 
-                let expected_len = indices
+                let expected_duties: Vec<PtcDuty> = indices
                     .iter()
-                    .filter(|i| **i < state.validators().len() as u64)
-                    .count();
+                    .filter_map(|&validator_index| {
+                        let validator = state.validators().get(validator_index as usize)?;
+                        let slot = state
+                            .get_ptc_assignment(validator_index as usize, epoch, &self.chain.spec)
+                            .unwrap()?;
+                        Some(PtcDuty {
+                            pubkey: validator.pubkey,
+                            validator_index,
+                            slot,
+                        })
+                    })
+                    .collect();
 
-                // PTC duties return only validators that have duties (not all requested validators)
-                assert!(result_duties.len() <= expected_len);
-
-                // Verify each returned duty
-                for duty in &result_duties {
-                    assert!(
-                        indices.contains(&duty.validator_index),
-                        "returned duty validator index should be in requested indices"
-                    );
-                    assert_eq!(
-                        duty.slot.epoch(E::slots_per_epoch()),
-                        epoch,
-                        "duty slot should be in requested epoch"
-                    );
-
-                    let expected_pubkey = state
-                        .validators()
-                        .get(duty.validator_index as usize)
-                        .unwrap()
-                        .pubkey;
-                    assert_eq!(
-                        duty.pubkey, expected_pubkey,
-                        "pubkey should match validator"
-                    );
-
-                    let expected_slot = state
-                        .get_ptc_assignment(duty.validator_index as usize, epoch, &self.chain.spec)
-                        .unwrap();
-                    assert_eq!(
-                        Some(duty.slot),
-                        expected_slot,
-                        "duty slot should match state PTC assignment"
-                    );
-                }
+                assert_eq!(
+                    result_duties, expected_duties,
+                    "ptc duties should exactly match state assignments"
+                );
             }
         }
 
@@ -8056,7 +8036,10 @@ async fn get_validator_duties_ptc() {
     if !fork_name_from_env().is_some_and(|f| f.gloas_enabled()) {
         return;
     }
-    ApiTester::new().await.test_get_validator_duties_ptc().await;
+    ApiTester::new_with_hard_forks()
+        .await
+        .test_get_validator_duties_ptc()
+        .await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -8064,7 +8047,7 @@ async fn get_validator_duties_ptc_with_skip_slots() {
     if !fork_name_from_env().is_some_and(|f| f.gloas_enabled()) {
         return;
     }
-    ApiTester::new()
+    ApiTester::new_with_hard_forks()
         .await
         .skip_slots(E::slots_per_epoch() * 2)
         .test_get_validator_duties_ptc()

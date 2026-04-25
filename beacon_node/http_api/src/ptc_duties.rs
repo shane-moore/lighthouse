@@ -16,7 +16,7 @@ pub fn ptc_duties<T: BeaconChainTypes>(
 ) -> Result<ApiDuties, warp::reject::Rejection> {
     let current_epoch = chain
         .slot_clock
-        .now()
+        .now_or_genesis()
         .map(|slot| slot.epoch(T::EthSpec::slots_per_epoch()))
         .ok_or(BeaconChainError::UnableToReadSlot)
         .map_err(warp_utils::reject::unhandled_error)?;
@@ -67,17 +67,22 @@ fn compute_ptc_duties_from_cached_head<T: BeaconChainTypes>(
     request_indices: &[u64],
     chain: &BeaconChain<T>,
 ) -> Result<ApiDuties, warp::reject::Rejection> {
-    let head = chain.canonical_head.cached_head();
-    let state = &head.snapshot.beacon_state;
-    let head_block_root = head.head_block_root();
+    let (cached_head, execution_status) = chain
+        .canonical_head
+        .head_and_execution_status()
+        .map_err(warp_utils::reject::unhandled_error)?;
+    let state = &cached_head.snapshot.beacon_state;
+    let head_block_root = cached_head.head_block_root();
 
     let (duties, dependent_root) = chain
         .compute_ptc_duties(state, request_epoch, request_indices, head_block_root)
         .map_err(warp_utils::reject::unhandled_error)?;
 
-    // TODO(gloas) set execution_optimistic correctly once optimistic sync
-    // is extended to gloas.
-    convert_to_api_response(duties, dependent_root, false)
+    convert_to_api_response(
+        duties,
+        dependent_root,
+        execution_status.is_optimistic_or_invalid(),
+    )
 }
 
 fn compute_ptc_duties_from_state<T: BeaconChainTypes>(

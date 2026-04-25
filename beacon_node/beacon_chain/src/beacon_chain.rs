@@ -1720,6 +1720,10 @@ impl<T: BeaconChainTypes> BeaconChain<T> {
     }
 
     /// Get PTC duties for validators at a given epoch.
+    ///
+    /// TODO(gloas): per-validator `get_ptc_assignment` makes this O(N * slots_per_epoch * PTCSize).
+    /// A future ptc cache (or a single-pass `ptc_window` walk) can drop this to
+    /// O(slots_per_epoch * PTCSize + N).
     pub fn compute_ptc_duties(
         &self,
         state: &BeaconState<T::EthSpec>,

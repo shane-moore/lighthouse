@@ -2563,7 +2563,7 @@ pub fn serve<T: BeaconChainTypes>(
 
     // POST validator/duties/ptc/{epoch}
     let post_validator_duties_ptc = post_validator_duties_ptc(
-        eth_v1.clone().clone(),
+        eth_v1.clone(),
         chain_filter.clone(),
         not_while_syncing_filter.clone(),
         task_spawner_filter.clone(),
