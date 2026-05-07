@@ -704,7 +704,11 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> BlockService<S, T> {
                 let signed_envelope = signed_envelope.clone();
                 async move {
                     beacon_node
-                        .post_beacon_execution_payload_envelope_ssz(&signed_envelope, fork_name)
+                        .post_beacon_execution_payload_envelope_ssz(
+                            &signed_envelope,
+                            fork_name,
+                            None,
+                        )
                         .await
                         .map_err(|e| {
                             BlockError::Recoverable(format!(

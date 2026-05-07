@@ -4388,7 +4388,7 @@ impl ApiTester {
             let signed_envelope =
                 self.sign_envelope(envelope, &sk, epoch, &fork, genesis_validators_root);
             self.client
-                .post_beacon_execution_payload_envelope(&signed_envelope, fork_name)
+                .post_beacon_execution_payload_envelope(&signed_envelope, fork_name, None)
                 .await
                 .unwrap();
 
@@ -4449,7 +4449,7 @@ impl ApiTester {
             let signed_envelope =
                 self.sign_envelope(envelope, &sk, epoch, &fork, genesis_validators_root);
             self.client
-                .post_beacon_execution_payload_envelope_ssz(&signed_envelope, fork_name)
+                .post_beacon_execution_payload_envelope_ssz(&signed_envelope, fork_name, None)
                 .await
                 .unwrap();
 
@@ -4832,6 +4832,224 @@ impl ApiTester {
         self
     }
 
+    fn advance_to_gloas_slot(&self) -> Option<(Slot, Epoch, ForkName)> {
+        for _ in 0..E::slots_per_epoch() * 3 {
+            let slot = self.chain.slot().unwrap();
+            let fork_name = self.chain.spec.fork_name_at_slot::<E>(slot);
+            if fork_name.gloas_enabled() {
+                return Some((slot, self.chain.epoch().unwrap(), fork_name));
+            }
+            self.chain.slot_clock.set_slot(slot.as_u64() + 1);
+        }
+        None
+    }
+
+    async fn build_and_post_block_for_envelope(
+        &self,
+        slot: Slot,
+        epoch: Epoch,
+        fork: &Fork,
+        genesis_validators_root: Hash256,
+    ) -> (SecretKey, u64, ExecutionPayloadEnvelope<E>) {
+        let (sk, randao_reveal) = self
+            .proposer_setup(slot, epoch, fork, genesis_validators_root)
+            .await;
+
+        let (response, _metadata) = self
+            .client
+            .get_validator_blocks_v4::<E>(slot, &randao_reveal, None, None, None)
+            .await
+            .unwrap();
+        let block = response.data;
+        let proposer_index = block.proposer_index();
+
+        let signed_block = block.sign(&sk, fork, genesis_validators_root, &self.chain.spec);
+        let signed_block_request = PublishBlockRequest::try_from(Arc::new(signed_block)).unwrap();
+        self.client
+            .post_beacon_blocks_v2(&signed_block_request, None)
+            .await
+            .unwrap();
+
+        let envelope = self
+            .client
+            .get_validator_execution_payload_envelope::<E>(slot, BUILDER_INDEX_SELF_BUILD)
+            .await
+            .unwrap()
+            .data;
+
+        (sk, proposer_index, envelope)
+    }
+
+    pub async fn test_envelope_post_consensus_invalid_returns_400_no_broadcast(mut self) -> Self {
+        if !self.chain.spec.is_gloas_scheduled() {
+            return self;
+        }
+
+        let fork = self.chain.canonical_head.cached_head().head_fork();
+        let genesis_validators_root = self.chain.genesis_validators_root;
+
+        let Some((slot, epoch, fork_name)) = self.advance_to_gloas_slot() else {
+            return self;
+        };
+
+        let (sk, _proposer_index, mut envelope) = self
+            .build_and_post_block_for_envelope(slot, epoch, &fork, genesis_validators_root)
+            .await;
+
+        // Set `gas_limit` to a value that cannot match the committed bid (consensus-only check).
+        envelope.payload.gas_limit = envelope.payload.gas_limit.saturating_add(1);
+        let signed_envelope =
+            self.sign_envelope(envelope, &sk, epoch, &fork, genesis_validators_root);
+
+        while self.network_rx.network_recv.recv().now_or_never().is_some() {}
+
+        let result = self
+            .client
+            .post_beacon_execution_payload_envelope(
+                &signed_envelope,
+                fork_name,
+                Some(BroadcastValidation::Consensus),
+            )
+            .await;
+
+        let err = result.expect_err("expected error on consensus-invalid envelope POST");
+        assert_eq!(err.status(), Some(StatusCode::BAD_REQUEST));
+        assert!(
+            self.network_rx.network_recv.recv().now_or_never().is_none(),
+            "envelope must not be broadcast when consensus validation fails"
+        );
+
+        self
+    }
+
+    pub async fn test_envelope_post_gossip_partial_pass_returns_202(mut self) -> Self {
+        if !self.chain.spec.is_gloas_scheduled() {
+            return self;
+        }
+
+        let fork = self.chain.canonical_head.cached_head().head_fork();
+        let genesis_validators_root = self.chain.genesis_validators_root;
+
+        let Some((slot, epoch, fork_name)) = self.advance_to_gloas_slot() else {
+            return self;
+        };
+
+        let (sk, _proposer_index, mut envelope) = self
+            .build_and_post_block_for_envelope(slot, epoch, &fork, genesis_validators_root)
+            .await;
+
+        // Set `gas_limit` to a value that cannot match the committed bid (consensus-only check).
+        envelope.payload.gas_limit = envelope.payload.gas_limit.saturating_add(1);
+        let signed_envelope =
+            self.sign_envelope(envelope, &sk, epoch, &fork, genesis_validators_root);
+
+        while self.network_rx.network_recv.recv().now_or_never().is_some() {}
+
+        // The eth2 client maps any 2xx (including 202) to `Ok`, which would erase the
+        // distinction we want to verify. Issue the request directly to assert the raw
+        // status code.
+        let url = self
+            .client
+            .post_beacon_execution_payload_envelope_path(Some(BroadcastValidation::Gossip))
+            .unwrap();
+        let response = reqwest::Client::new()
+            .post(url)
+            .header("Content-Type", "application/json")
+            .header(eth2::CONSENSUS_VERSION_HEADER, fork_name.to_string())
+            .json(&signed_envelope)
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+        assert!(
+            self.network_rx.network_recv.recv().now_or_never().is_some(),
+            "envelope must be broadcast at gossip level even when consensus fails"
+        );
+
+        self
+    }
+
+    pub async fn test_envelope_post_equivocation_returns_400(mut self) -> Self {
+        if !self.chain.spec.is_gloas_scheduled() {
+            return self;
+        }
+
+        let fork = self.chain.canonical_head.cached_head().head_fork();
+        let genesis_validators_root = self.chain.genesis_validators_root;
+
+        let Some((slot, epoch, fork_name)) = self.advance_to_gloas_slot() else {
+            return self;
+        };
+
+        let (sk, proposer_index, envelope) = self
+            .build_and_post_block_for_envelope(slot, epoch, &fork, genesis_validators_root)
+            .await;
+        let signed_envelope =
+            self.sign_envelope(envelope, &sk, epoch, &fork, genesis_validators_root);
+
+        // Simulate an equivocation: a different block_root observed at the same
+        // (slot, proposer). `is_slashable` will then return true for the real block_root.
+        self.chain
+            .observed_slashable
+            .write()
+            .observe_slashable(slot, proposer_index, Hash256::repeat_byte(0xee))
+            .unwrap();
+
+        while self.network_rx.network_recv.recv().now_or_never().is_some() {}
+
+        let result = self
+            .client
+            .post_beacon_execution_payload_envelope(
+                &signed_envelope,
+                fork_name,
+                Some(BroadcastValidation::ConsensusAndEquivocation),
+            )
+            .await;
+
+        let err = result.expect_err("expected 400 on equivocating envelope");
+        assert_eq!(err.status(), Some(StatusCode::BAD_REQUEST));
+        match err {
+            ServerMessage(msg) => assert!(
+                msg.message.contains("Slashable"),
+                "expected error to mention Slashable, got: {}",
+                msg.message,
+            ),
+            other => panic!("expected ServerMessage, got {other:?}"),
+        }
+        assert!(
+            self.network_rx.network_recv.recv().now_or_never().is_none(),
+            "envelope must not be broadcast when equivocation is detected"
+        );
+
+        self
+    }
+
+    pub async fn test_envelope_post_missing_consensus_version_header(self) -> Self {
+        if !self.chain.spec.is_gloas_scheduled() {
+            return self;
+        }
+
+        let url = self
+            .client
+            .post_beacon_execution_payload_envelope_path(None)
+            .unwrap();
+        let response = reqwest::Client::new()
+            .post(url)
+            .header("Content-Type", "application/json")
+            .body(b"{}".to_vec())
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            StatusCode::BAD_REQUEST,
+            "expected 400 when Eth-Consensus-Version header is missing"
+        );
+
+        self
+    }
+
     /// Regression test: publishing an envelope via the HTTP API must import it locally so
     /// that `produce_payload_attestation_data` returns `payload_present = true`. Without
     /// local import, the `envelope_times_cache` is never populated and PTC voters on the
@@ -4886,7 +5104,7 @@ impl ApiTester {
             let signed_envelope =
                 self.sign_envelope(envelope, &sk, epoch, &fork, genesis_validators_root);
             self.client
-                .post_beacon_execution_payload_envelope(&signed_envelope, fork_name)
+                .post_beacon_execution_payload_envelope(&signed_envelope, fork_name, None)
                 .await
                 .unwrap();
 
@@ -8636,6 +8854,50 @@ async fn payload_attestation_present_after_envelope_publish() {
     ApiTester::new_with_hard_forks()
         .await
         .test_payload_attestation_present_after_envelope_publish()
+        .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn envelope_post_consensus_invalid_returns_400_no_broadcast() {
+    if !fork_name_from_env().is_some_and(|f| f.gloas_enabled()) {
+        return;
+    }
+    ApiTester::new_with_hard_forks()
+        .await
+        .test_envelope_post_consensus_invalid_returns_400_no_broadcast()
+        .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn envelope_post_gossip_partial_pass_returns_202() {
+    if !fork_name_from_env().is_some_and(|f| f.gloas_enabled()) {
+        return;
+    }
+    ApiTester::new_with_hard_forks()
+        .await
+        .test_envelope_post_gossip_partial_pass_returns_202()
+        .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn envelope_post_equivocation_returns_400() {
+    if !fork_name_from_env().is_some_and(|f| f.gloas_enabled()) {
+        return;
+    }
+    ApiTester::new_with_hard_forks()
+        .await
+        .test_envelope_post_equivocation_returns_400()
+        .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn envelope_post_missing_consensus_version_header() {
+    if !fork_name_from_env().is_some_and(|f| f.gloas_enabled()) {
+        return;
+    }
+    ApiTester::new_with_hard_forks()
+        .await
+        .test_envelope_post_missing_consensus_version_header()
         .await;
 }
 

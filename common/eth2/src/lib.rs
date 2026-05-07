@@ -2776,21 +2776,33 @@ impl BeaconNodeHttpClient {
         ExecutionPayloadEnvelope::from_ssz_bytes(&response_bytes).map_err(Error::InvalidSsz)
     }
 
-    /// `POST v1/beacon/execution_payload_envelope`
-    pub async fn post_beacon_execution_payload_envelope<E: EthSpec>(
+    pub fn post_beacon_execution_payload_envelope_path(
         &self,
-        envelope: &SignedExecutionPayloadEnvelope<E>,
-        fork_name: ForkName,
-    ) -> Result<(), Error> {
+        validation_level: Option<BroadcastValidation>,
+    ) -> Result<Url, Error> {
         let mut path = self.eth_path(V1)?;
-
         path.path_segments_mut()
             .map_err(|()| Error::InvalidUrl(self.server.clone()))?
             .push("beacon")
             .push("execution_payload_envelope");
 
+        if let Some(validation_level) = validation_level {
+            path.query_pairs_mut()
+                .append_pair("broadcast_validation", &validation_level.to_string());
+        }
+
+        Ok(path)
+    }
+
+    /// `POST v1/beacon/execution_payload_envelope`
+    pub async fn post_beacon_execution_payload_envelope<E: EthSpec>(
+        &self,
+        envelope: &SignedExecutionPayloadEnvelope<E>,
+        fork_name: ForkName,
+        validation_level: Option<BroadcastValidation>,
+    ) -> Result<(), Error> {
         self.post_generic_with_consensus_version(
-            path,
+            self.post_beacon_execution_payload_envelope_path(validation_level)?,
             envelope,
             Some(self.timeouts.proposal),
             fork_name,
@@ -2805,16 +2817,10 @@ impl BeaconNodeHttpClient {
         &self,
         envelope: &SignedExecutionPayloadEnvelope<E>,
         fork_name: ForkName,
+        validation_level: Option<BroadcastValidation>,
     ) -> Result<(), Error> {
-        let mut path = self.eth_path(V1)?;
-
-        path.path_segments_mut()
-            .map_err(|()| Error::InvalidUrl(self.server.clone()))?
-            .push("beacon")
-            .push("execution_payload_envelope");
-
         self.post_generic_with_consensus_version_and_ssz_body(
-            path,
+            self.post_beacon_execution_payload_envelope_path(validation_level)?,
             envelope.as_ssz_bytes(),
             Some(self.timeouts.proposal),
             fork_name,
