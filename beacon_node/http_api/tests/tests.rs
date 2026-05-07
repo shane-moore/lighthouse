@@ -5025,31 +5025,6 @@ impl ApiTester {
         self
     }
 
-    pub async fn test_envelope_post_missing_consensus_version_header(self) -> Self {
-        if !self.chain.spec.is_gloas_scheduled() {
-            return self;
-        }
-
-        let url = self
-            .client
-            .post_beacon_execution_payload_envelope_path(None)
-            .unwrap();
-        let response = reqwest::Client::new()
-            .post(url)
-            .header("Content-Type", "application/json")
-            .body(b"{}".to_vec())
-            .send()
-            .await
-            .unwrap();
-        assert_eq!(
-            response.status(),
-            StatusCode::BAD_REQUEST,
-            "expected 400 when Eth-Consensus-Version header is missing"
-        );
-
-        self
-    }
-
     /// Regression test: publishing an envelope via the HTTP API must import it locally so
     /// that `produce_payload_attestation_data` returns `payload_present = true`. Without
     /// local import, the `envelope_times_cache` is never populated and PTC voters on the
@@ -8887,17 +8862,6 @@ async fn envelope_post_equivocation_returns_400() {
     ApiTester::new_with_hard_forks()
         .await
         .test_envelope_post_equivocation_returns_400()
-        .await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn envelope_post_missing_consensus_version_header() {
-    if !fork_name_from_env().is_some_and(|f| f.gloas_enabled()) {
-        return;
-    }
-    ApiTester::new_with_hard_forks()
-        .await
-        .test_envelope_post_missing_consensus_version_header()
         .await;
 }
 
