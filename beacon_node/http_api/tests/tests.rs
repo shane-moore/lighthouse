@@ -4858,7 +4858,7 @@ impl ApiTester {
 
         let (response, _metadata) = self
             .client
-            .get_validator_blocks_v4::<E>(slot, &randao_reveal, None, None, None)
+            .get_validator_blocks_v4::<E>(slot, &randao_reveal, None, None, None, None)
             .await
             .unwrap();
         let block = response.data;
@@ -4873,7 +4873,7 @@ impl ApiTester {
 
         let envelope = self
             .client
-            .get_validator_execution_payload_envelope::<E>(slot, BUILDER_INDEX_SELF_BUILD)
+            .get_validator_execution_payload_envelope::<E>(slot)
             .await
             .unwrap()
             .data;
