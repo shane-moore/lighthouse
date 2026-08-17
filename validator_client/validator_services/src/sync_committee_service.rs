@@ -1,5 +1,8 @@
 use crate::duties_service::DutiesService;
-use beacon_node_fallback::{ApiTopic, BeaconNodeFallback};
+use beacon_node_fallback::{
+    ApiTopic, BeaconNodeFallback,
+    beacon_head_monitor::{HeadEvent, head_event_or_deadline},
+};
 use bls::PublicKeyBytes;
 use eth2::types::BlockId;
 use futures::StreamExt;
@@ -11,6 +14,7 @@ use std::ops::Deref;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use task_executor::TaskExecutor;
+use tokio::sync::{Mutex, broadcast};
 use tokio::time::{Duration, Instant, sleep, sleep_until};
 use tracing::{Instrument, debug, error, info, info_span, instrument, trace, warn};
 use types::{
@@ -20,6 +24,30 @@ use types::{
 use validator_store::{ContributionToSign, SyncMessageToSign, ValidatorStore};
 
 pub const SUBSCRIPTION_LOOKAHEAD_EPOCHS: u64 = 4;
+
+/// Duration from now until `due` past the start of `slot`, or `None` if `slot` is not the
+/// current slot.
+fn delay_until_slot_offset<T: SlotClock>(
+    slot_clock: &T,
+    slot: Slot,
+    due: Duration,
+) -> Option<Duration> {
+    let now = slot_clock.now_duration()?;
+    if slot_clock.slot_of(now)? != slot {
+        return None;
+    }
+    let due_at = slot_clock.start_of(slot)?.checked_add(due)?;
+    Some(due_at.saturating_sub(now))
+}
+
+/// The next slot and the duration until it starts, derived from a single clock read so the
+/// two values always describe the same slot.
+fn next_slot_with_duration<T: SlotClock>(slot_clock: &T) -> Option<(Slot, Duration)> {
+    let now = slot_clock.now_duration()?;
+    let next_slot = slot_clock.slot_of(now)? + 1;
+    let duration_to_next_slot = slot_clock.start_of(next_slot)?.saturating_sub(now);
+    Some((next_slot, duration_to_next_slot))
+}
 
 pub struct SyncCommitteeService<S: ValidatorStore, T: SlotClock + 'static> {
     inner: Arc<Inner<S, T>>,
@@ -47,6 +75,7 @@ pub struct Inner<S: ValidatorStore, T: SlotClock + 'static> {
     slot_clock: T,
     beacon_nodes: Arc<BeaconNodeFallback<T>>,
     executor: TaskExecutor,
+    head_monitor_rx: Mutex<Option<broadcast::Receiver<HeadEvent>>>,
     /// Boolean to track whether the service has posted subscriptions to the BN at least once.
     ///
     /// This acts as a latch that fires once upon start-up, and then never again.
@@ -60,6 +89,7 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> SyncCommitteeService<S
         slot_clock: T,
         beacon_nodes: Arc<BeaconNodeFallback<T>>,
         executor: TaskExecutor,
+        head_monitor_rx: Option<broadcast::Receiver<HeadEvent>>,
     ) -> Self {
         Self {
             inner: Arc::new(Inner {
@@ -68,6 +98,7 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> SyncCommitteeService<S
                 slot_clock,
                 beacon_nodes,
                 executor,
+                head_monitor_rx: Mutex::new(head_monitor_rx),
                 first_subscription_done: AtomicBool::new(false),
             }),
         }
@@ -106,35 +137,54 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> SyncCommitteeService<S
 
         let executor = self.executor.clone();
 
-        let sync_message_slot_component = spec.get_sync_message_due();
-
         let interval_fut = async move {
+            let mut head_monitor_rx = self.head_monitor_rx.lock().await.take();
+            let mut last_processed_slot: Option<Slot> = None;
             loop {
-                if let Some(duration_to_next_slot) = self.slot_clock.duration_to_next_slot() {
-                    // Wait for contribution broadcast interval 1/3 of the way through the slot.
-                    sleep(duration_to_next_slot + sync_message_slot_component).await;
-
-                    // Do nothing if the Altair fork has not yet occurred.
-                    if !self.altair_fork_activated() {
-                        continue;
-                    }
-
-                    if let Err(e) = self.spawn_contribution_tasks().await {
-                        crit!(
-                            error = ?e,
-                            "Failed to spawn sync contribution tasks"
-                        );
-                    } else {
-                        trace!("Spawned sync contribution tasks");
-                    }
-
-                    // Do subscriptions for future slots/epochs.
-                    self.spawn_subscription_tasks();
-                } else {
+                let Some((next_slot, duration_to_next_slot)) =
+                    next_slot_with_duration(&self.slot_clock)
+                else {
                     error!("Failed to read slot clock");
-                    // If we can't read the slot clock, just wait another slot.
                     sleep(slot_duration).await;
+                    continue;
+                };
+
+                // Wait for the sync message due point of the next slot, or a head event for the
+                // current slot, whichever comes first.
+                let sync_message_due = self
+                    .duties_service
+                    .spec
+                    .get_sync_message_due_at_slot::<S::E>(next_slot);
+                let head_event = head_event_or_deadline(
+                    &mut head_monitor_rx,
+                    &self.slot_clock,
+                    duration_to_next_slot + sync_message_due,
+                )
+                .await;
+
+                // Take the slot from the trigger itself rather than re-reading the clock, so a
+                // head event arriving at the end of a slot is never attributed to the next slot.
+                let (current_slot, head_event_root) = match head_event {
+                    Some(event) => (event.slot, Some(event.beacon_block_root)),
+                    None => (next_slot, None),
+                };
+
+                if last_processed_slot.is_some_and(|last_slot| current_slot <= last_slot) {
+                    debug!(%current_slot, "Sync message slot already processed");
+                    continue;
                 }
+
+                // Do nothing if the Altair fork has not yet occurred.
+                if !self.altair_fork_activated() {
+                    continue;
+                }
+
+                self.spawn_contribution_tasks(current_slot, head_event_root)
+                    .await;
+                last_processed_slot = Some(current_slot);
+
+                // Do subscriptions for future slots/epochs.
+                self.spawn_subscription_tasks();
             }
         };
 
@@ -142,65 +192,104 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> SyncCommitteeService<S
         Ok(())
     }
 
-    async fn spawn_contribution_tasks(&self) -> Result<(), String> {
+    async fn spawn_contribution_tasks(&self, slot: Slot, mut head_event_root: Option<Hash256>) {
         let spec = &self.duties_service.spec;
-        let slot = self.slot_clock.now().ok_or("Failed to read slot clock")?;
-        let duration_to_next_slot = self
-            .slot_clock
-            .duration_to_next_slot()
-            .ok_or("Unable to determine duration to next slot")?;
 
-        // If a validator needs to publish a sync aggregate, they must do so at 2/3
-        // through the slot. This delay triggers at this time
-        let aggregate_production_instant = Instant::now()
-            + duration_to_next_slot
-                .checked_add(spec.get_contribution_message_due())
-                .and_then(|offset| offset.checked_sub(spec.get_slot_duration()))
-                .unwrap_or_else(|| Duration::from_secs(0));
-
-        let Some(slot_duties) = self
+        let mut slot_duties = self
             .duties_service
             .sync_duties
-            .get_duties_for_slot::<S::E>(slot, &self.duties_service.spec)
-        else {
-            debug!("No duties known for slot {}", slot);
-            return Ok(());
+            .get_duties_for_slot::<S::E>(slot, spec);
+
+        // If a head event triggered us before the duties were computed, wait until the sync
+        // message deadline and check for duties once more.
+        if slot_duties.is_none() && head_event_root.is_some() {
+            let Some(duration_to_deadline) = delay_until_slot_offset(
+                &self.slot_clock,
+                slot,
+                spec.get_sync_message_due_at_slot::<S::E>(slot),
+            ) else {
+                debug!(%slot, "Skipping sync committee tasks for expired slot");
+                return;
+            };
+            sleep(duration_to_deadline).await;
+
+            slot_duties = self
+                .duties_service
+                .sync_duties
+                .get_duties_for_slot::<S::E>(slot, spec);
+
+            // The head may have changed while sleeping, so discard the event root and fall
+            // back to a fresh head lookup below.
+            head_event_root = None;
+        }
+
+        let Some(slot_duties) = slot_duties else {
+            debug!(%slot, "No duties known for slot");
+            return;
         };
 
         if slot_duties.duties.is_empty() {
             debug!(%slot, "No local validators in current sync committee");
-            return Ok(());
+            return;
         }
 
-        // Fetch `block_root` with non optimistic execution for `SyncCommitteeContribution`.
-        let response = self
-            .beacon_nodes
-            .first_success(
-                |beacon_node| async move {
-                    match beacon_node.get_beacon_blocks_root(BlockId::Head).await {
-                        Ok(Some(block)) if block.execution_optimistic == Some(false) => {
-                            Ok(block)
-                        }
-                        Ok(Some(_)) => {
-                            Err(format!("To sign sync committee messages for slot {slot} a non-optimistic head block is required"))
-                        }
-                        Ok(None) => Err(format!("No block root found for slot {}", slot)),
-                        Err(e) => Err(e.to_string()),
-                    }
-                },
-            )
-            .await;
+        // If a validator needs to publish a sync aggregate, they must do so at 2/3
+        // through the slot. This delay triggers at this time
+        let Some(contribution_delay) =
+            delay_until_slot_offset(&self.slot_clock, slot, spec.get_contribution_message_due())
+        else {
+            debug!(%slot, "Skipping sync committee tasks for expired slot");
+            return;
+        };
+        // Messages past the contribution deadline can no longer be aggregated, so a trigger
+        // this late (a head event for the slot already in progress at startup) is skipped.
+        if contribution_delay.is_zero() {
+            debug!(%slot, "Skipping sync committee tasks, contribution deadline passed");
+            return;
+        }
+        let aggregate_production_instant = Instant::now() + contribution_delay;
 
-        let block_root = match response {
-            Ok(block) => block.data.root,
-            Err(errs) => {
-                warn!(
-                    errors = errs.to_string(),
-                    %slot,
-                    "Refusing to sign sync committee messages for an optimistic head block or \
-                    a block head with unknown optimistic status"
-                );
-                return Ok(());
+        debug!(
+            %slot,
+            from_head_monitor = head_event_root.is_some(),
+            "Starting sync committee message production"
+        );
+
+        let block_root = if let Some(block_root) = head_event_root {
+            // The head monitor only forwards non-optimistic heads, so the event root can be
+            // used directly.
+            block_root
+        } else {
+            // Fetch `block_root` with non optimistic execution for `SyncCommitteeContribution`.
+            let response = self
+                .beacon_nodes
+                .first_success(
+                    |beacon_node| async move {
+                        match beacon_node.get_beacon_blocks_root(BlockId::Head).await {
+                            Ok(Some(block)) if block.execution_optimistic == Some(false) => {
+                                Ok(block)
+                            }
+                            Ok(Some(_)) => {
+                                Err(format!("To sign sync committee messages for slot {slot} a non-optimistic head block is required"))
+                            }
+                            Ok(None) => Err(format!("No block root found for slot {}", slot)),
+                            Err(e) => Err(e.to_string()),
+                        }
+                    },
+                )
+                .await;
+
+            match response {
+                Ok(block) => block.data.root,
+                Err(errs) => {
+                    warn!(
+                        errors = errs.to_string(),
+                        %slot,
+                        "Refusing to sign sync committee messages for an optimistic head block or \
+                        a block head with unknown optimistic status"
+                    );
+                    return;
+                }
             }
         };
 
@@ -236,7 +325,7 @@ impl<S: ValidatorStore + 'static, T: SlotClock + 'static> SyncCommitteeService<S
             "sync_committee_aggregate_publish",
         );
 
-        Ok(())
+        trace!("Spawned sync contribution tasks");
     }
 
     /// Publish sync committee signatures.

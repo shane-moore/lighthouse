@@ -112,6 +112,7 @@ pub struct ChainSpec {
     pub payload_attestation_due_bps: u64,
     pub aggregate_due_bps: u64,
     pub sync_message_due_bps: u64,
+    pub sync_message_due_bps_gloas: u64,
     pub contribution_due_bps: u64,
 
     /*
@@ -123,6 +124,7 @@ pub struct ChainSpec {
     pub payload_attestation_due: Duration,
     pub aggregate_attestation_due: Duration,
     pub sync_message_due: Duration,
+    pub sync_message_due_gloas: Duration,
     pub contribution_and_proof_due: Duration,
 
     /*
@@ -924,6 +926,15 @@ impl ChainSpec {
         self.sync_message_due
     }
 
+    /// Spec: `get_sync_message_due_ms`. Returns the epoch-appropriate threshold.
+    pub fn get_sync_message_due_at_slot<E: EthSpec>(&self, slot: Slot) -> Duration {
+        if self.fork_name_at_slot::<E>(slot).gloas_enabled() {
+            self.sync_message_due_gloas
+        } else {
+            self.sync_message_due
+        }
+    }
+
     /// Calculate the duration into a slot for a given slot component
     pub fn compute_slot_component_duration(
         &self,
@@ -970,6 +981,11 @@ impl ChainSpec {
             self.sync_message_due_bps
         );
         assert!(
+            self.sync_message_due_bps_gloas <= BASIS_POINTS,
+            "invalid chain spec: sync_message_due_bps_gloas ({}) exceeds slot duration",
+            self.sync_message_due_bps_gloas
+        );
+        assert!(
             self.contribution_due_bps <= BASIS_POINTS,
             "invalid chain spec: contribution_due_bps ({}) exceeds slot duration",
             self.contribution_due_bps
@@ -993,6 +1009,9 @@ impl ChainSpec {
         self.sync_message_due = self
             .compute_slot_component_duration(self.sync_message_due_bps)
             .expect("invalid chain spec: cannot compute sync_message_due");
+        self.sync_message_due_gloas = self
+            .compute_slot_component_duration(self.sync_message_due_bps_gloas)
+            .expect("invalid chain spec: cannot compute sync_message_due_gloas");
         self.contribution_and_proof_due = self
             .compute_slot_component_duration(self.contribution_due_bps)
             .expect("invalid chain spec: cannot compute contribution_and_proof_due");
@@ -1122,6 +1141,7 @@ impl ChainSpec {
             payload_attestation_due_bps: 7500,
             aggregate_due_bps: 6667,
             sync_message_due_bps: 3333,
+            sync_message_due_bps_gloas: 2500,
             contribution_due_bps: 6667,
 
             /*
@@ -1133,6 +1153,7 @@ impl ChainSpec {
             payload_attestation_due: Duration::from_millis(9000),
             aggregate_attestation_due: Duration::from_millis(8000),
             sync_message_due: Duration::from_millis(3999),
+            sync_message_due_gloas: Duration::from_millis(3000),
             contribution_and_proof_due: Duration::from_millis(8000),
 
             /*
@@ -1456,6 +1477,7 @@ impl ChainSpec {
             payload_attestation_due: Duration::from_millis(4500),
             aggregate_attestation_due: Duration::from_millis(4000),
             sync_message_due: Duration::from_millis(1999),
+            sync_message_due_gloas: Duration::from_millis(1500),
             contribution_and_proof_due: Duration::from_millis(4000),
 
             // Networking Fulu
@@ -1558,6 +1580,7 @@ impl ChainSpec {
             payload_attestation_due: Duration::from_millis(3750),
             aggregate_attestation_due: Duration::from_millis(3333),
             sync_message_due: Duration::from_millis(1666),
+            sync_message_due_gloas: Duration::from_millis(1250),
             contribution_and_proof_due: Duration::from_millis(3333),
 
             /*
@@ -1629,6 +1652,7 @@ impl ChainSpec {
             altair_fork_version: [0x01, 0x00, 0x00, 0x64],
             altair_fork_epoch: Some(Epoch::new(512)),
             sync_message_due_bps: 3333,
+            sync_message_due_bps_gloas: 2500,
             contribution_due_bps: 6667,
 
             /*
@@ -2166,6 +2190,9 @@ pub struct Config {
     #[serde(default = "default_sync_message_due_bps")]
     #[serde(with = "serde_utils::quoted_u64")]
     sync_message_due_bps: u64,
+    #[serde(default = "default_sync_message_due_bps_gloas")]
+    #[serde(with = "serde_utils::quoted_u64")]
+    sync_message_due_bps_gloas: u64,
     #[serde(default = "default_contribution_due_bps")]
     #[serde(with = "serde_utils::quoted_u64")]
     contribution_due_bps: u64,
@@ -2414,6 +2441,10 @@ const fn default_aggregate_due_bps() -> u64 {
 
 const fn default_sync_message_due_bps() -> u64 {
     3333
+}
+
+const fn default_sync_message_due_bps_gloas() -> u64 {
+    2500
 }
 
 const fn default_contribution_due_bps() -> u64 {
@@ -2693,6 +2724,7 @@ impl Config {
             payload_attestation_due_bps: spec.payload_attestation_due_bps,
             aggregate_due_bps: spec.aggregate_due_bps,
             sync_message_due_bps: spec.sync_message_due_bps,
+            sync_message_due_bps_gloas: spec.sync_message_due_bps_gloas,
             contribution_due_bps: spec.contribution_due_bps,
 
             min_builder_withdrawability_delay: spec.min_builder_withdrawability_delay.as_u64(),
@@ -2797,6 +2829,7 @@ impl Config {
             payload_attestation_due_bps,
             aggregate_due_bps,
             sync_message_due_bps,
+            sync_message_due_bps_gloas,
             contribution_due_bps,
             min_builder_withdrawability_delay,
             churn_limit_quotient_gloas,
@@ -2907,6 +2940,7 @@ impl Config {
             payload_attestation_due_bps,
             aggregate_due_bps,
             sync_message_due_bps,
+            sync_message_due_bps_gloas,
             contribution_due_bps,
 
             min_builder_withdrawability_delay: Epoch::new(min_builder_withdrawability_delay),
@@ -3676,6 +3710,7 @@ mod yaml_tests {
         // Test sync message (3333 bps = 33.33% of 12s = 4s)
         let sync_msg_due = spec.get_sync_message_due();
         assert_eq!(sync_msg_due, Duration::from_millis(3999)); // 12000 * 3333 / 10000
+        assert_eq!(spec.sync_message_due_gloas, Duration::from_millis(3000));
 
         // Test contribution message (6667 bps = 66.67% of 12s = 8s)
         let contribution_due = spec.get_contribution_message_due();
@@ -3755,6 +3790,24 @@ mod yaml_tests {
             custom_spec.unaggregated_attestation_due_gloas,
             Duration::from_millis(6000)
         ); // 12000 * 5000 / 10000
+    }
+
+    #[test]
+    fn sync_message_due_at_slot() {
+        let mut spec = ChainSpec::mainnet();
+        let gloas_fork_epoch = Epoch::new(1);
+        spec.gloas_fork_epoch = Some(gloas_fork_epoch);
+        let spec = spec.compute_derived_values::<MainnetEthSpec>();
+        let gloas_fork_slot = gloas_fork_epoch.start_slot(MainnetEthSpec::slots_per_epoch());
+
+        assert_eq!(
+            spec.get_sync_message_due_at_slot::<MainnetEthSpec>(gloas_fork_slot - 1),
+            Duration::from_millis(3999)
+        );
+        assert_eq!(
+            spec.get_sync_message_due_at_slot::<MainnetEthSpec>(gloas_fork_slot),
+            Duration::from_millis(3000)
+        );
     }
 
     #[test]
@@ -3852,6 +3905,14 @@ mod yaml_tests {
         let mut spec = ChainSpec::mainnet();
         // 15000 bps = 150% of slot duration, which is invalid
         spec.attestation_due_bps = 15000;
+        spec.compute_derived_values::<MainnetEthSpec>();
+    }
+
+    #[test]
+    #[should_panic(expected = "sync_message_due_bps_gloas")]
+    fn compute_derived_values_rejects_invalid_gloas_sync_message_due() {
+        let mut spec = ChainSpec::mainnet();
+        spec.sync_message_due_bps_gloas = BASIS_POINTS + 1;
         spec.compute_derived_values::<MainnetEthSpec>();
     }
 
